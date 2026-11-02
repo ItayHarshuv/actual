@@ -765,6 +765,34 @@ class AccountInternal extends PureComponent<
     }
   };
 
+  onSaveConversionFee = (conversionFeePercent: number) => {
+    const account = this.props.accounts.find(
+      account => account.id === this.props.accountId,
+    );
+    if (!account) {
+      throw new Error(`Account with ID ${this.props.accountId} not found.`);
+    }
+    this.props.onUpdateAccount({
+      ...account,
+      conversion_fee_percent: conversionFeePercent,
+    });
+  };
+
+  onSaveExchangeRateProvider = (
+    exchangeRateProvider: NonNullable<AccountEntity['exchange_rate_provider']>,
+  ) => {
+    const account = this.props.accounts.find(
+      account => account.id === this.props.accountId,
+    );
+    if (!account) {
+      throw new Error(`Account with ID ${this.props.accountId} not found.`);
+    }
+    this.props.onUpdateAccount({
+      ...account,
+      exchange_rate_provider: exchangeRateProvider,
+    });
+  };
+
   onToggleExtraBalances = () => {
     this.props.setShowExtraBalances(!this.props.showExtraBalances);
   };
@@ -1813,6 +1841,8 @@ class AccountInternal extends PureComponent<
                 onAddTransaction={this.onAddTransaction}
                 onToggleExtraBalances={this.onToggleExtraBalances}
                 onSaveName={this.onSaveName}
+                onSaveConversionFee={this.onSaveConversionFee}
+                onSaveExchangeRateProvider={this.onSaveExchangeRateProvider}
                 saveNameError={this.state.nameError}
                 onReconcile={this.onReconcile}
                 onDoneReconciling={this.onDoneReconciling}

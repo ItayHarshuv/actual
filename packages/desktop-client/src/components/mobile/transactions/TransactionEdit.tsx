@@ -19,6 +19,7 @@ import {
   SvgTrash,
 } from '@actual-app/components/icons/v1';
 import { SvgPencilWriteAlternate } from '@actual-app/components/icons/v2';
+import { Select } from '@actual-app/components/select';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -77,6 +78,12 @@ import { getPrettyPayee } from '@desktop-client/components/mobile/utils';
 import { MobilePageHeader, Page } from '@desktop-client/components/Page';
 import { createSingleTimeScheduleFromTransaction } from '@desktop-client/components/transactions/TransactionList';
 import { AmountInput } from '@desktop-client/components/util/AmountInput';
+import {
+  clearTransactionCurrency,
+  isTransactionCurrency,
+  setTransactionCurrencyAmount,
+  transactionCurrencyCodes,
+} from '@desktop-client/currency/transactionCurrency';
 import { useAccounts } from '@desktop-client/hooks/useAccounts';
 import { useCategories } from '@desktop-client/hooks/useCategories';
 import { useDateFormat } from '@desktop-client/hooks/useDateFormat';
@@ -107,11 +114,15 @@ function serializeTransaction(
   transaction: TransactionEntity,
   dateFormat: string,
 ) {
-  const { date, amount } = transaction;
+  const { date, amount, original_amount: originalAmount } = transaction;
+  const displayedAmount =
+    transaction.original_currency && originalAmount != null
+      ? originalAmount
+      : amount;
   return {
     ...transaction,
     date: formatDate(parseISO(date), dateFormat),
-    amount: integerToAmount(amount || 0),
+    amount: integerToAmount(displayedAmount || 0),
   };
 }
 
@@ -588,6 +599,10 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
     const { t } = useTranslation();
     const navigate = useNavigate();
     const dispatch = useDispatch();
+    const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
+    const showTransactionCurrency =
+      isTransactionCurrency(defaultCurrencyCode) &&
+      !unserializedTransactions[0]?.is_parent;
     const [showHiddenCategories] = useLocalPref('budget.showHiddenCategories');
     const [upcomingLength = '7'] = useSyncedPref(
       'upcomingScheduledTransactionLength',
@@ -1087,6 +1102,48 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
               }}
               textStyle={{ ...styles.veryLargeText, textAlign: 'center' }}
             />
+            {showTransactionCurrency && (
+              <>
+                <Select
+                  aria-label={t('Transaction currency')}
+                  value={transaction.original_currency || defaultCurrencyCode}
+                  onChange={currencyCode =>
+                    void onUpdateInner(
+                      transaction,
+                      'original_currency',
+                      currencyCode === defaultCurrencyCode
+                        ? null
+                        : currencyCode,
+                    )
+                  }
+                  options={transactionCurrencyCodes.map(code => [
+                    code,
+                    code === 'ILS' ? 'NIS' : code,
+                  ])}
+                  style={{ marginTop: 8, minWidth: 100 }}
+                />
+                {transaction.original_currency && (
+                  <Text
+                    style={{
+                      ...styles.tnum,
+                      marginTop: 6,
+                      color: theme.pageTextSubdued,
+                      fontSize: 12,
+                    }}
+                  >
+                    {t('In {{currency}}: {{amount}}', {
+                      currency: defaultCurrencyCode,
+                      amount: integerToCurrency(
+                        unserializedTransactions[0].amount,
+                      ),
+                    })}
+                    {unserializedTransactions[0].exchange_rate_date
+                      ? ` · ${unserializedTransactions[0].exchange_rate_date}`
+                      : ''}
+                  </Text>
+                )}
+              </>
+            )}
           </View>
 
           <View>
@@ -1377,6 +1434,7 @@ function TransactionEditUnconnected({
   const { state: locationState } = useLocation();
   const [searchParams] = useSearchParams();
   const dispatch = useDispatch();
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
   const updatePayeeLocationMutation = useSavePayeeLocationMutation();
   const navigate = useNavigate();
   const [transactions, setTransactions] = useState<TransactionEntity[]>([]);
@@ -1489,11 +1547,90 @@ function TransactionEditUnconnected({
       serializedTransaction: TransactionEntity,
       updatedField: keyof TransactionEntity,
     ) => {
-      const transaction = deserializeTransaction(
+      let transaction = deserializeTransaction(
         serializedTransaction,
         null,
         dateFormat,
       );
+      const transactionAccount = accounts.find(
+        account => account.id === transaction.account,
+      );
+      const conversionFeePercent =
+        transactionAccount?.conversion_fee_percent ?? 0;
+      const exchangeRateProvider =
+        transactionAccount?.exchange_rate_provider ?? 'frankfurter';
+
+      if (isTransactionCurrency(defaultCurrencyCode)) {
+        try {
+          if (updatedField === 'amount' && transaction.original_currency) {
+            transaction = await setTransactionCurrencyAmount(
+              transaction,
+              transaction.amount,
+              transaction.original_currency,
+              defaultCurrencyCode,
+              conversionFeePercent,
+              exchangeRateProvider,
+            );
+          } else if (
+            updatedField === 'account' &&
+            transaction.original_currency &&
+            transaction.original_amount != null
+          ) {
+            transaction = await setTransactionCurrencyAmount(
+              transaction,
+              transaction.original_amount,
+              transaction.original_currency,
+              defaultCurrencyCode,
+              conversionFeePercent,
+              exchangeRateProvider,
+            );
+          } else if (
+            updatedField === 'date' &&
+            transaction.original_currency &&
+            transaction.original_amount != null
+          ) {
+            transaction = await setTransactionCurrencyAmount(
+              transaction,
+              transaction.original_amount,
+              transaction.original_currency,
+              defaultCurrencyCode,
+              conversionFeePercent,
+              exchangeRateProvider,
+            );
+          } else if (updatedField === 'original_currency') {
+            if (transaction.original_currency) {
+              transaction = await setTransactionCurrencyAmount(
+                transaction,
+                transaction.amount,
+                transaction.original_currency,
+                defaultCurrencyCode,
+                conversionFeePercent,
+                exchangeRateProvider,
+              );
+            } else {
+              const existingTransaction = transactions.find(
+                item => item.id === transaction.id,
+              );
+              transaction = clearTransactionCurrency({
+                ...transaction,
+                amount: existingTransaction?.amount ?? transaction.amount,
+              });
+            }
+          }
+        } catch {
+          dispatch(
+            addNotification({
+              notification: {
+                type: 'error',
+                message: t(
+                  'Could not load an exchange rate. Connect to the internet once to cache a rate.',
+                ),
+              },
+            }),
+          );
+          return;
+        }
+      }
 
       // Run the rules to auto-fill in any data. Right now we only do
       // this on new transactions because that's how desktop works.
@@ -1570,7 +1707,15 @@ function TransactionEditUnconnected({
         }
       }
     },
-    [dateFormat, transactions, locationAccess],
+    [
+      dateFormat,
+      defaultCurrencyCode,
+      accounts,
+      dispatch,
+      locationAccess,
+      t,
+      transactions,
+    ],
   );
 
   const onSave = useCallback(

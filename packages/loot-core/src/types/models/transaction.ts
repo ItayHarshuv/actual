@@ -13,6 +13,10 @@ export type TransactionEntity = {
   account: AccountEntity['id'];
   category?: CategoryEntity['id'];
   amount: IntegerAmount;
+  original_amount?: IntegerAmount | null;
+  original_currency?: string | null;
+  exchange_rate?: string | null;
+  exchange_rate_date?: string | null;
   payee?: PayeeEntity['id'] | null;
   notes?: string;
   date: string;

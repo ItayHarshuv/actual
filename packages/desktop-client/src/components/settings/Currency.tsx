@@ -42,6 +42,7 @@ export function CurrencySettings() {
         ['HUF', t('Hungarian Forint')],
         ['IDR', t('Indonesian Rupiah')],
         ['INR', t('Indian Rupee')],
+        ['ILS', t('Israeli New Shekel')],
         ['JMD', t('Jamaican Dollar')],
         ['JPY', t('Japanese Yen')],
         ['KRW', t('South Korean Won')],

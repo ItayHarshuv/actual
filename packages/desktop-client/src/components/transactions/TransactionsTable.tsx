@@ -40,6 +40,7 @@ import {
   SvgSubtract,
 } from '@actual-app/components/icons/v2';
 import { Popover } from '@actual-app/components/popover';
+import { Select } from '@actual-app/components/select';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -48,6 +49,7 @@ import { View } from '@actual-app/components/view';
 import { format as formatDate, parseISO } from 'date-fns';
 import memoizeOne from 'memoize-one';
 
+import { evalArithmetic } from 'loot-core/shared/arithmetic';
 import * as monthUtils from 'loot-core/shared/months';
 import { q } from 'loot-core/shared/query';
 import { getStatusLabel } from 'loot-core/shared/schedules';
@@ -63,6 +65,7 @@ import {
 } from 'loot-core/shared/transactions';
 import {
   amountToCurrency,
+  amountToInteger,
   currencyToAmount,
   integerToCurrency,
   titleFirst,
@@ -118,6 +121,15 @@ import type {
   TableProps,
 } from '@desktop-client/components/table';
 import {
+  asPaymentAmount,
+  clearTransactionCurrency,
+  convertForeignAmount,
+  convertMainAmountToForeign,
+  isTransactionCurrency,
+  setTransactionCurrencyAmount,
+  transactionCurrencyCodes,
+} from '@desktop-client/currency/transactionCurrency';
+import {
   SchedulesProvider,
   useCachedSchedules,
 } from '@desktop-client/hooks/useCachedSchedules';
@@ -148,6 +160,7 @@ import {
 import { SheetNameProvider } from '@desktop-client/hooks/useSheetName';
 import { useSplitsExpanded } from '@desktop-client/hooks/useSplitsExpanded';
 import type { SplitsExpandedContextValue } from '@desktop-client/hooks/useSplitsExpanded';
+import { useSyncedPref } from '@desktop-client/hooks/useSyncedPref';
 import { pushModal } from '@desktop-client/modals/modalsSlice';
 import { NotesTagFormatter } from '@desktop-client/notes/NotesTagFormatter';
 import { addNotification } from '@desktop-client/notifications/notificationsSlice';
@@ -182,6 +195,8 @@ const TransactionHeader = memo(
   }: TransactionHeaderProps) => {
     const dispatchSelected = useSelectedDispatch();
     const { t } = useTranslation();
+    const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
+    const showTransactionCurrency = isTransactionCurrency(defaultCurrencyCode);
 
     useHotkeys(
       'ctrl+a, cmd+a, meta+a',
@@ -293,6 +308,14 @@ const TransactionHeader = memo(
                 selectAscDesc(field, ascDesc, 'category', 'asc'),
               )
             }
+          />
+        )}
+        {showTransactionCurrency && (
+          <HeaderCell
+            value={t('Foreign currency')}
+            width={202}
+            alignItems="center"
+            id="foreign-currency"
           />
         )}
         <HeaderCell
@@ -969,6 +992,14 @@ const Transaction = memo(function Transaction({
   const { t } = useTranslation();
 
   const dispatch = useDispatch();
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
+  const showTransactionCurrency = isTransactionCurrency(defaultCurrencyCode);
+  const conversionFeePercent =
+    accounts.find(account => account.id === originalTransaction.account)
+      ?.conversion_fee_percent ?? 0;
+  const exchangeRateProvider =
+    accounts.find(account => account.id === originalTransaction.account)
+      ?.exchange_rate_provider ?? 'frankfurter';
   const dispatchSelected = useSelectedDispatch();
   const triggerRef = useRef(null);
 
@@ -1006,6 +1037,7 @@ const Transaction = memo(function Transaction({
         transaction.reconciled === true &&
         (name === 'credit' ||
           name === 'debit' ||
+          name === 'foreignAmount' ||
           name === 'payee' ||
           name === 'account' ||
           name === 'date')
@@ -1087,6 +1119,36 @@ const Transaction = memo(function Transaction({
       newTransaction.reconciled = false;
     }
 
+    if (
+      name === 'foreignAmount' &&
+      typeof value === 'string' &&
+      originalTransaction.original_currency
+    ) {
+      const parsedAmount = evalArithmetic(value, null);
+      const exchangeRate = Number(originalTransaction.exchange_rate);
+      if (
+        parsedAmount != null &&
+        Number.isFinite(exchangeRate) &&
+        exchangeRate > 0
+      ) {
+        const originalAmount = asPaymentAmount(amountToInteger(parsedAmount));
+        const updatedTransaction = {
+          ...originalTransaction,
+          amount: convertForeignAmount(
+            originalAmount,
+            exchangeRate,
+            conversionFeePercent,
+          ),
+          original_amount: originalAmount,
+        };
+        setTransaction(
+          serializeTransaction(updatedTransaction, showZeroInDeposit),
+        );
+        onSave(updatedTransaction, subtransactions, 'original_amount');
+      }
+      return;
+    }
+
     // Don't save a temporary value (a new payee) which will be
     // filled in with a real id later
     if (
@@ -1100,6 +1162,111 @@ const Transaction = memo(function Transaction({
         newTransaction,
         originalTransaction,
       );
+
+      if (
+        name === 'account' &&
+        deserialized.original_currency &&
+        deserialized.original_amount != null &&
+        isTransactionCurrency(defaultCurrencyCode)
+      ) {
+        const targetAccount = accounts.find(
+          account => account.id === deserialized.account,
+        );
+        void setTransactionCurrencyAmount(
+          deserialized,
+          deserialized.original_amount,
+          deserialized.original_currency,
+          defaultCurrencyCode,
+          targetAccount?.conversion_fee_percent ?? 0,
+          targetAccount?.exchange_rate_provider ?? 'frankfurter',
+        )
+          .then(convertedTransaction => {
+            setTransaction(
+              serializeTransaction(convertedTransaction, showZeroInDeposit),
+            );
+            onSave(convertedTransaction, subtransactions, 'account');
+          })
+          .catch(() => {
+            dispatch(
+              addNotification({
+                notification: {
+                  type: 'error',
+                  message: t(
+                    'Could not load an exchange rate. Connect to the internet once to cache a rate.',
+                  ),
+                },
+              }),
+            );
+            setTransaction(
+              serializeTransaction(originalTransaction, showZeroInDeposit),
+            );
+          });
+        return;
+      }
+
+      if (
+        name === 'date' &&
+        deserialized.original_currency &&
+        deserialized.original_amount != null &&
+        isTransactionCurrency(defaultCurrencyCode)
+      ) {
+        void setTransactionCurrencyAmount(
+          deserialized,
+          deserialized.original_amount,
+          deserialized.original_currency,
+          defaultCurrencyCode,
+          conversionFeePercent,
+          exchangeRateProvider,
+        )
+          .then(convertedTransaction => {
+            setTransaction(
+              serializeTransaction(convertedTransaction, showZeroInDeposit),
+            );
+            onSave(convertedTransaction, subtransactions, 'date');
+          })
+          .catch(() => {
+            dispatch(
+              addNotification({
+                notification: {
+                  type: 'error',
+                  message: t(
+                    'Could not load an exchange rate. Connect to the internet once to cache a rate.',
+                  ),
+                },
+              }),
+            );
+            setTransaction(
+              serializeTransaction(originalTransaction, showZeroInDeposit),
+            );
+          });
+        return;
+      }
+
+      if (
+        (name === 'credit' || name === 'debit') &&
+        deserialized.original_currency &&
+        deserialized.exchange_rate
+      ) {
+        const exchangeRate = Number(deserialized.exchange_rate);
+        if (Number.isFinite(exchangeRate) && exchangeRate > 0) {
+          const paymentAmount = asPaymentAmount(deserialized.amount);
+          const updatedTransaction = {
+            ...deserialized,
+            amount: paymentAmount,
+            original_amount: convertMainAmountToForeign(
+              paymentAmount,
+              exchangeRate,
+              conversionFeePercent,
+            ),
+          };
+          setTransaction(
+            serializeTransaction(updatedTransaction, showZeroInDeposit),
+          );
+          onSave(updatedTransaction, subtransactions, 'amount');
+          return;
+        }
+      }
+
       // Run the transaction through the formatting so that we know
       // it's always showing the formatted result
       setTransaction(serializeTransaction(deserialized, showZeroInDeposit));
@@ -1111,11 +1278,56 @@ const Transaction = memo(function Transaction({
     }
   };
 
+  const onCurrencyChange = (currencyCode: string) => {
+    if (!isTransactionCurrency(defaultCurrencyCode)) {
+      return;
+    }
+
+    if (currencyCode === defaultCurrencyCode) {
+      const updatedTransaction = clearTransactionCurrency(originalTransaction);
+      setTransaction(
+        serializeTransaction(updatedTransaction, showZeroInDeposit),
+      );
+      onSave(updatedTransaction, subtransactions, 'original_currency');
+      return;
+    }
+
+    const originalAmount =
+      originalTransaction.original_amount ?? originalTransaction.amount;
+    void setTransactionCurrencyAmount(
+      originalTransaction,
+      originalAmount,
+      currencyCode,
+      defaultCurrencyCode,
+      conversionFeePercent,
+      exchangeRateProvider,
+    )
+      .then(updatedTransaction => {
+        setTransaction(
+          serializeTransaction(updatedTransaction, showZeroInDeposit),
+        );
+        onSave(updatedTransaction, subtransactions, 'original_currency');
+      })
+      .catch(() => {
+        dispatch(
+          addNotification({
+            notification: {
+              type: 'error',
+              message: t(
+                'Could not load an exchange rate. Connect to the internet once to cache a rate.',
+              ),
+            },
+          }),
+        );
+      });
+  };
+
   const {
     id,
     amount,
     debit,
     credit,
+    foreignAmount,
     payee: payeeId,
     imported_payee: importedPayee,
     notes,
@@ -1749,6 +1961,54 @@ const Transaction = memo(function Transaction({
           </CustomCell>
         )}
 
+        {showTransactionCurrency && (
+          <>
+            <Cell width={72} plain style={{ padding: 2, alignItems: 'center' }}>
+              <Select
+                aria-label={t('Transaction currency')}
+                value={transaction.original_currency || defaultCurrencyCode}
+                onChange={onCurrencyChange}
+                options={transactionCurrencyCodes.map(code => [
+                  code,
+                  code === 'ILS' ? 'NIS' : code,
+                ])}
+                disabled={
+                  isPreview ||
+                  isParent ||
+                  isChild ||
+                  !!transferAcct ||
+                  (isTemporaryId(transaction.id) === false && reconciled)
+                }
+                style={{ width: '100%', minWidth: 0 }}
+              />
+            </Cell>
+            <InputCell
+              type="input"
+              width={130}
+              name="foreignAmount"
+              exposed={focusedField === 'foreignAmount'}
+              focused={focusedField === 'foreignAmount'}
+              value={foreignAmount}
+              formatter={value =>
+                value ? amountToCurrency(currencyToAmount(value) || 0) : ''
+              }
+              valueStyle={valueStyle}
+              textAlign="right"
+              title={foreignAmount}
+              onExpose={name =>
+                transaction.original_currency && !isPreview && onEdit(id, name)
+              }
+              style={{ ...styles.tnum, ...amountStyle }}
+              inputProps={{
+                value: foreignAmount,
+                onUpdate: onUpdate.bind(null, 'foreignAmount'),
+                readOnly: !transaction.original_currency,
+                'data-1p-ignore': true,
+              }}
+            />
+          </>
+        )}
+
         <InputCell
           /* Debit field for all transactions */
           type="input"
@@ -1758,7 +2018,6 @@ const Transaction = memo(function Transaction({
           focused={focusedField === 'debit'}
           value={debit === '' && credit === '' ? amountToCurrency(0) : debit}
           formatter={value =>
-            // reformat value so since we might have kept decimals
             value ? amountToCurrency(currencyToAmount(value) || 0) : ''
           }
           valueStyle={valueStyle}
@@ -1789,7 +2048,6 @@ const Transaction = memo(function Transaction({
           focused={focusedField === 'credit'}
           value={credit}
           formatter={value =>
-            // reformat value so since we might have kept decimals
             value ? amountToCurrency(currencyToAmount(value) || 0) : ''
           }
           valueStyle={valueStyle}

@@ -6,6 +6,8 @@ export type AccountEntity = {
   sort_order: number;
   last_reconciled: string | null;
   tombstone: 0 | 1;
+  conversion_fee_percent?: number;
+  exchange_rate_provider?: 'frankfurter' | 'bank-of-israel';
 
   // Sync fields
   account_id: string | null;

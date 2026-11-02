@@ -35,6 +35,7 @@ import type { AccountEntity, TransactionEntity } from 'loot-core/types/models';
 import { lookupName, Status } from './TransactionEdit';
 
 import { makeAmountFullStyle } from '@desktop-client/components/budget/util';
+import { formatOriginalAmount } from '@desktop-client/currency/transactionCurrency';
 import { useAccount } from '@desktop-client/hooks/useAccount';
 import { useCachedSchedules } from '@desktop-client/hooks/useCachedSchedules';
 import { useCategories } from '@desktop-client/hooks/useCategories';
@@ -290,6 +291,18 @@ export function TransactionListItem({
             >
               {integerToCurrency(amount)}
             </Text>
+            {transaction.original_currency &&
+              transaction.original_amount != null && (
+                <Text
+                  style={{
+                    ...styles.tnum,
+                    fontSize: 10,
+                    color: theme.pageTextSubdued,
+                  }}
+                >
+                  {formatOriginalAmount(transaction)}
+                </Text>
+              )}
             {showRunningBalance && runningBalance !== undefined && (
               <Text
                 style={{

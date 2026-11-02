@@ -17,6 +17,7 @@ export type SerializedTransaction = Omit<TransactionEntity, 'date'> & {
   date: string;
   debit: CurrencyAmount;
   credit: CurrencyAmount;
+  foreignAmount: CurrencyAmount;
 };
 
 export type TransactionEditFunction = (
@@ -33,7 +34,11 @@ export function serializeTransaction(
   transaction: TransactionEntity,
   showZeroInDeposit?: boolean,
 ): SerializedTransaction {
-  const { amount, date: originalDate } = transaction;
+  const {
+    amount,
+    original_amount: originalAmount,
+    date: originalDate,
+  } = transaction;
 
   let debit = amount < 0 ? -amount : null;
   let credit = amount > 0 ? amount : null;
@@ -64,6 +69,10 @@ export function serializeTransaction(
     date,
     debit: debit != null ? integerToCurrencyWithDecimal(debit) : '',
     credit: credit != null ? integerToCurrencyWithDecimal(credit) : '',
+    foreignAmount:
+      transaction.original_currency && originalAmount != null
+        ? integerToCurrencyWithDecimal(Math.abs(originalAmount))
+        : '',
   };
 }
 
@@ -71,7 +80,13 @@ export function deserializeTransaction(
   transaction: SerializedTransaction,
   originalTransaction: TransactionEntity,
 ) {
-  const { debit, credit, date: originalDate, ...realTransaction } = transaction;
+  const {
+    debit,
+    credit,
+    foreignAmount: _foreignAmount,
+    date: originalDate,
+    ...realTransaction
+  } = transaction;
 
   let amount: number | null;
   if (debit !== '') {

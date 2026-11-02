@@ -18,9 +18,11 @@ import {
   SvgPencil1,
 } from '@actual-app/components/icons/v2';
 import { InitialFocus } from '@actual-app/components/initial-focus';
+import { InlineField } from '@actual-app/components/inline-field';
 import { Input } from '@actual-app/components/input';
 import { Menu } from '@actual-app/components/menu';
 import { Popover } from '@actual-app/components/popover';
+import { Select } from '@actual-app/components/select';
 import { SpaceBetween } from '@actual-app/components/space-between';
 import { styles } from '@actual-app/components/styles';
 import { theme } from '@actual-app/components/theme';
@@ -95,6 +97,10 @@ type AccountHeaderProps = {
     typeof Balances
   >['onToggleExtraBalances'];
   onSaveName: AccountNameFieldProps['onSaveName'];
+  onSaveConversionFee: (conversionFeePercent: number) => void;
+  onSaveExchangeRateProvider: (
+    provider: NonNullable<AccountEntity['exchange_rate_provider']>,
+  ) => void;
   saveNameError: AccountNameFieldProps['saveNameError'];
   onSync: () => void;
   onImport: () => void;
@@ -165,6 +171,8 @@ export function AccountHeader({
   onCreateReconciliationTransaction,
   onToggleExtraBalances,
   onSaveName,
+  onSaveConversionFee,
+  onSaveExchangeRateProvider,
   saveNameError,
   onSync,
   onImport,
@@ -513,6 +521,8 @@ export function AccountHeader({
                       showBalances={showBalances}
                       showCleared={showCleared}
                       showReconciled={showReconciled}
+                      onSaveConversionFee={onSaveConversionFee}
+                      onSaveExchangeRateProvider={onSaveExchangeRateProvider}
                       onMenuSelect={onMenuSelect}
                     />
                   </Dialog>
@@ -737,6 +747,10 @@ type AccountMenuProps = {
   showCleared: boolean;
   showReconciled: boolean;
   isSorted: boolean;
+  onSaveConversionFee: (conversionFeePercent: number) => void;
+  onSaveExchangeRateProvider: (
+    provider: NonNullable<AccountEntity['exchange_rate_provider']>,
+  ) => void;
   onMenuSelect: (
     item:
       | 'link'
@@ -761,77 +775,128 @@ function AccountMenu({
   showCleared,
   showReconciled,
   isSorted,
+  onSaveConversionFee,
+  onSaveExchangeRateProvider,
   onMenuSelect,
 }: AccountMenuProps) {
   const { t } = useTranslation();
   const syncServerStatus = useSyncServerStatus();
+  const [conversionFeePercent, setConversionFeePercent] = useState(
+    String(account.conversion_fee_percent ?? 0),
+  );
 
   return (
-    <Menu
-      slot="close"
-      onMenuSelect={item => {
-        onMenuSelect(item);
-      }}
-      items={[
-        ...(isSorted
-          ? [
-              {
-                name: 'remove-sorting',
-                text: t('Remove all sorting'),
-              } as const,
-            ]
-          : []),
-        ...(canShowBalances
-          ? [
-              {
-                name: 'toggle-balance',
-                text: showBalances
-                  ? t('Hide running balance')
-                  : t('Show running balance'),
-              } as const,
-            ]
-          : []),
-        {
-          name: 'toggle-net-worth-chart',
-          text: showNetWorthChart
-            ? t('Hide balance chart')
-            : t('Show balance chart'),
-        },
-        {
-          name: 'toggle-cleared',
-          text: showCleared
-            ? t('Hide "cleared" checkboxes')
-            : t('Show "cleared" checkboxes'),
-        },
-        {
-          name: 'toggle-reconciled',
-          text: showReconciled
-            ? t('Hide reconciled transactions')
-            : t('Show reconciled transactions'),
-        },
-        { name: 'export', text: t('Export') },
-        ...(account && !account.closed
-          ? canSync
+    <View>
+      <InlineField
+        label={t('Exchange rate source')}
+        width="100%"
+        style={{ padding: 10, paddingBottom: 0 }}
+      >
+        <Select
+          value={account.exchange_rate_provider ?? 'frankfurter'}
+          onChange={value =>
+            onSaveExchangeRateProvider(
+              value === 'bank-of-israel' ? 'bank-of-israel' : 'frankfurter',
+            )
+          }
+          options={[
+            ['frankfurter', t('Frankfurter')],
+            ['bank-of-israel', t('Bank of Israel')],
+          ]}
+          style={{ flex: 1 }}
+        />
+      </InlineField>
+      <InlineField
+        label={t('Currency conversion fee (%)')}
+        width="100%"
+        style={{ padding: 10 }}
+      >
+        <Input
+          value={conversionFeePercent}
+          inputMode="decimal"
+          onChangeValue={setConversionFeePercent}
+          onUpdate={value => {
+            const parsedValue = Number(value);
+            if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+              setConversionFeePercent(
+                String(account.conversion_fee_percent ?? 0),
+              );
+              return;
+            }
+            const normalizedValue = Math.min(parsedValue, 100);
+            setConversionFeePercent(String(normalizedValue));
+            onSaveConversionFee(normalizedValue);
+          }}
+          aria-label={t('Currency conversion fee percentage')}
+          style={{ flex: 1 }}
+        />
+      </InlineField>
+      <Menu
+        slot="close"
+        onMenuSelect={item => {
+          onMenuSelect(item);
+        }}
+        items={[
+          ...(isSorted
             ? [
                 {
-                  name: 'unlink',
-                  text: t('Unlink account'),
+                  name: 'remove-sorting',
+                  text: t('Remove all sorting'),
                 } as const,
               ]
-            : syncServerStatus === 'online'
+            : []),
+          ...(canShowBalances
+            ? [
+                {
+                  name: 'toggle-balance',
+                  text: showBalances
+                    ? t('Hide running balance')
+                    : t('Show running balance'),
+                } as const,
+              ]
+            : []),
+          {
+            name: 'toggle-net-worth-chart',
+            text: showNetWorthChart
+              ? t('Hide balance chart')
+              : t('Show balance chart'),
+          },
+          {
+            name: 'toggle-cleared',
+            text: showCleared
+              ? t('Hide "cleared" checkboxes')
+              : t('Show "cleared" checkboxes'),
+          },
+          {
+            name: 'toggle-reconciled',
+            text: showReconciled
+              ? t('Hide reconciled transactions')
+              : t('Show reconciled transactions'),
+          },
+          { name: 'export', text: t('Export') },
+          ...(account && !account.closed
+            ? canSync
               ? [
                   {
-                    name: 'link',
-                    text: t('Link account'),
+                    name: 'unlink',
+                    text: t('Unlink account'),
                   } as const,
                 ]
-              : []
-          : []),
+              : syncServerStatus === 'online'
+                ? [
+                    {
+                      name: 'link',
+                      text: t('Link account'),
+                    } as const,
+                  ]
+                : []
+            : []),
 
-        ...(account.closed
-          ? [{ name: 'reopen', text: t('Reopen account') } as const]
-          : [{ name: 'close', text: t('Close account') } as const]),
-      ]}
-    />
+          ...(account.closed
+            ? [{ name: 'reopen', text: t('Reopen account') } as const]
+            : [{ name: 'close', text: t('Close account') } as const]),
+        ]}
+      />
+    </View>
   );
 }

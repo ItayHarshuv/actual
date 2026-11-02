@@ -31,6 +31,7 @@ import {
 import { app as mainApp } from '../main-app';
 import { mutator } from '../mutators';
 import { get, post } from '../post';
+import { getExchangeRate } from '../preferences/app';
 import { getServer } from '../server-config';
 import { batchMessages } from '../sync';
 import { undoable, withUndo } from '../undo';
@@ -80,13 +81,127 @@ async function updateAccount({
   id,
   name,
   last_reconciled,
+  conversion_fee_percent,
+  exchange_rate_provider,
 }: Pick<AccountEntity, 'id' | 'name'> &
-  Partial<Pick<AccountEntity, 'last_reconciled'>>) {
+  Partial<
+    Pick<
+      AccountEntity,
+      'last_reconciled' | 'conversion_fee_percent' | 'exchange_rate_provider'
+    >
+  >) {
+  const existingAccount = await db.first<db.DbAccount>(
+    'SELECT * FROM accounts WHERE id = ?',
+    [id],
+  );
+  const conversionFeePercent =
+    conversion_fee_percent == null
+      ? undefined
+      : Math.min(Math.max(conversion_fee_percent, 0), 100);
+  const exchangeRateProvider =
+    exchange_rate_provider === 'bank-of-israel'
+      ? 'bank-of-israel'
+      : exchange_rate_provider === 'frankfurter'
+        ? 'frankfurter'
+        : undefined;
   await db.update('accounts', {
     id,
     name,
     ...(last_reconciled && { last_reconciled }),
+    ...(conversionFeePercent !== undefined && {
+      conversion_fee_percent: conversionFeePercent,
+    }),
+    ...(exchangeRateProvider !== undefined && {
+      exchange_rate_provider: exchangeRateProvider,
+    }),
   });
+
+  if (
+    conversionFeePercent !== undefined ||
+    exchangeRateProvider !== undefined
+  ) {
+    const transactions = await db.all<
+      Pick<
+        db.DbTransaction,
+        | 'id'
+        | 'date'
+        | 'original_amount'
+        | 'original_currency'
+        | 'exchange_rate'
+      >
+    >(
+      `SELECT id, date, original_amount, original_currency, exchange_rate
+       FROM transactions
+       WHERE acct = ? AND tombstone = 0 AND original_amount IS NOT NULL
+         AND original_currency IS NOT NULL`,
+      [id],
+    );
+    const defaultCurrency = await db.first<Pick<db.DbPreference, 'value'>>(
+      `SELECT value FROM preferences WHERE id = 'defaultCurrencyCode'`,
+    );
+    const effectiveFeePercent =
+      conversionFeePercent ?? existingAccount?.conversion_fee_percent ?? 0;
+    const effectiveProvider =
+      exchangeRateProvider ??
+      existingAccount?.exchange_rate_provider ??
+      'frankfurter';
+    const fetchedRates = new Map<string, { rate: number; date: string }>();
+
+    for (const transaction of transactions) {
+      let exchangeRate = Number(transaction.exchange_rate);
+      let exchangeRateDate: string | undefined;
+      if (
+        exchangeRateProvider !== undefined &&
+        transaction.original_currency &&
+        defaultCurrency?.value
+      ) {
+        const transactionDate = db.fromDateRepr(transaction.date);
+        const cacheKey = `${transaction.original_currency}:${defaultCurrency.value}:${transactionDate}`;
+        let fetchedRate = fetchedRates.get(cacheKey);
+        if (!fetchedRate) {
+          try {
+            fetchedRate = await getExchangeRate({
+              source: transaction.original_currency,
+              target: defaultCurrency.value,
+              date: transactionDate,
+              provider: effectiveProvider,
+            });
+            fetchedRates.set(cacheKey, fetchedRate);
+          } catch (error) {
+            logger.warn('Unable to recalculate transaction exchange rate', {
+              transactionId: transaction.id,
+              error,
+            });
+          }
+        }
+        if (fetchedRate) {
+          exchangeRate = fetchedRate.rate;
+          exchangeRateDate = fetchedRate.date;
+        }
+      }
+
+      if (
+        transaction.original_amount != null &&
+        Number.isFinite(exchangeRate) &&
+        exchangeRate > 0
+      ) {
+        await db.update('transactions', {
+          id: transaction.id,
+          amount: Math.round(
+            transaction.original_amount *
+              exchangeRate *
+              (transaction.original_amount < 0
+                ? 1 + effectiveFeePercent / 100
+                : 1),
+          ),
+          ...(exchangeRateDate && {
+            exchange_rate: String(exchangeRate),
+            exchange_rate_date: exchangeRateDate,
+          }),
+        });
+      }
+    }
+  }
   return {};
 }
 
@@ -113,6 +228,9 @@ async function getAccounts(): Promise<AccountEntity[]> {
         balance_limit: dbAccount.balance_limit ?? null,
         account_sync_source: dbAccount.account_sync_source ?? null,
         last_sync: dbAccount.last_sync ?? null,
+        conversion_fee_percent: dbAccount.conversion_fee_percent ?? 0,
+        exchange_rate_provider:
+          dbAccount.exchange_rate_provider ?? 'frankfurter',
       }) satisfies AccountEntity,
   );
 }

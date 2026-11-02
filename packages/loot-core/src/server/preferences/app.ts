@@ -1,5 +1,7 @@
 import * as asyncStorage from '../../platform/server/asyncStorage';
+import { fetch } from '../../platform/server/fetch';
 import * as fs from '../../platform/server/fs';
+import { currentDay } from '../../shared/months';
 import { stringToInteger } from '../../shared/util';
 import type {
   GlobalPrefs,
@@ -22,6 +24,7 @@ import { undoable } from '../undo';
 export type PreferencesHandlers = {
   'preferences/save': typeof saveSyncedPrefs;
   'preferences/get': typeof getSyncedPrefs;
+  'exchange-rates/get': typeof getExchangeRate;
   'save-global-prefs': typeof saveGlobalPrefs;
   'load-global-prefs': typeof loadGlobalPrefs;
   'save-prefs': typeof saveMetadataPrefs;
@@ -33,6 +36,7 @@ export const app = createApp<PreferencesHandlers>();
 
 app.method('preferences/save', mutator(undoable(saveSyncedPrefs)));
 app.method('preferences/get', getSyncedPrefs);
+app.method('exchange-rates/get', getExchangeRate);
 app.method('save-global-prefs', saveGlobalPrefs);
 app.method('load-global-prefs', loadGlobalPrefs);
 app.method('save-prefs', saveMetadataPrefs);
@@ -62,9 +66,164 @@ async function getSyncedPrefs(): Promise<SyncedPrefs> {
   );
 
   return prefs.reduce<SyncedPrefs>((carry, { value, id }) => {
-    carry[id as keyof SyncedPrefs] = value;
+    if (!id.startsWith('exchange-rate:')) {
+      carry[id as keyof SyncedPrefs] = value;
+    }
     return carry;
   }, {});
+}
+
+type ExchangeRate = {
+  source: string;
+  target: string;
+  rate: number;
+  date: string;
+  isCached: boolean;
+};
+
+export type ExchangeRateProvider = 'frankfurter' | 'bank-of-israel';
+
+const supportedCurrencies = new Set(['EUR', 'ILS', 'USD']);
+
+export async function getExchangeRate({
+  source,
+  target,
+  date,
+  provider = 'frankfurter',
+}: {
+  source: string;
+  target: string;
+  date?: string;
+  provider?: ExchangeRateProvider;
+}): Promise<ExchangeRate> {
+  if (!supportedCurrencies.has(source) || !supportedCurrencies.has(target)) {
+    throw new Error('Unsupported currency');
+  }
+
+  if (source === target) {
+    return { source, target, rate: 1, date: '', isCached: false };
+  }
+
+  const requestedDate =
+    date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
+  const latestCacheId = `exchange-rate:${provider}:${source}:${target}`;
+  const cacheId = requestedDate
+    ? `${latestCacheId}:${requestedDate}`
+    : latestCacheId;
+  const cached = await db.first<Pick<db.DbPreference, 'value'>>(
+    'SELECT value FROM preferences WHERE id = ?',
+    [cacheId],
+  );
+  const latestCached =
+    cacheId === latestCacheId
+      ? cached
+      : await db.first<Pick<db.DbPreference, 'value'>>(
+          'SELECT value FROM preferences WHERE id = ?',
+          [latestCacheId],
+        );
+
+  const historicalQuery =
+    requestedDate && requestedDate <= currentDay()
+      ? `&from=${requestedDate}&to=${requestedDate}`
+      : '';
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  try {
+    const requestUrl =
+      provider === 'bank-of-israel'
+        ? (() => {
+            const server = getServer();
+            if (!server) {
+              throw new Error(
+                'Bank of Israel rates require a configured Actual server',
+              );
+            }
+            const url = new URL(
+              '/exchange-rates/bank-of-israel',
+              server.BASE_SERVER,
+            );
+            url.searchParams.set('source', source);
+            url.searchParams.set('target', target);
+            if (requestedDate) {
+              url.searchParams.set('date', requestedDate);
+            }
+            return url.toString();
+          })()
+        : `https://api.frankfurter.dev/v2/rates?base=${source}&quotes=${target}${historicalQuery}`;
+    const response = await fetch(requestUrl, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Exchange-rate request failed: ${response.status}`);
+    }
+
+    const responseData = await response.json();
+    const data: {
+      source: string;
+      target: string;
+      date: string;
+      rate: number;
+    } | null =
+      provider === 'bank-of-israel'
+        ? (responseData as {
+            source: string;
+            target: string;
+            date: string;
+            rate: number;
+          })
+        : (() => {
+            const frankfurterRate = (
+              responseData as Array<{
+                date: string;
+                base: string;
+                quote: string;
+                rate: number;
+              }>
+            )[0];
+            return frankfurterRate
+              ? {
+                  source: frankfurterRate.base,
+                  target: frankfurterRate.quote,
+                  date: frankfurterRate.date,
+                  rate: frankfurterRate.rate,
+                }
+              : null;
+          })();
+    const rate =
+      data?.source === source && data.target === target
+        ? data?.rate
+        : undefined;
+    if (!data?.date || !Number.isFinite(rate) || !rate || rate <= 0) {
+      throw new Error('Exchange-rate response did not contain a valid rate');
+    }
+
+    const result: ExchangeRate = {
+      source,
+      target,
+      rate,
+      date: data.date,
+      isCached: false,
+    };
+    await db.update('preferences', {
+      id: cacheId,
+      value: JSON.stringify(result),
+    });
+    if (cacheId !== latestCacheId) {
+      await db.update('preferences', {
+        id: latestCacheId,
+        value: JSON.stringify(result),
+      });
+    }
+    return result;
+  } catch (error) {
+    const fallback = cached ?? latestCached;
+    if (fallback) {
+      const result = JSON.parse(fallback.value) as ExchangeRate;
+      return { ...result, isCached: true };
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function saveGlobalPrefs(prefs: GlobalPrefs) {

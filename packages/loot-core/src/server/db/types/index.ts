@@ -24,6 +24,8 @@ export type DbAccount = {
   account_sync_source?: 'simpleFin' | 'goCardless' | null;
   last_reconciled?: string | null;
   last_sync?: string | null;
+  conversion_fee_percent: number;
+  exchange_rate_provider: 'frankfurter' | 'bank-of-israel';
 };
 
 export type DbBank = {
@@ -156,6 +158,10 @@ export type DbTransaction = {
   date: number;
   acct: DbAccount['id'];
   amount: number;
+  original_amount?: number | null;
+  original_currency?: string | null;
+  exchange_rate?: string | null;
+  exchange_rate_date?: string | null;
   sort_order: number;
   parent_id?: DbTransaction['id'] | null;
   category?: DbCategory['id'] | null;
@@ -265,6 +271,10 @@ export type DbViewTransactionInternal = {
   date: DbTransaction['date'];
   account: DbAccount['id'];
   amount: DbTransaction['amount'];
+  original_amount: DbTransaction['original_amount'] | null;
+  original_currency: DbTransaction['original_currency'] | null;
+  exchange_rate: DbTransaction['exchange_rate'] | null;
+  exchange_rate_date: DbTransaction['exchange_rate_date'] | null;
   parent_id: DbTransaction['parent_id'] | null;
   category: DbCategory['id'] | null;
   payee: DbPayee['id'] | null;

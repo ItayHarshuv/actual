@@ -9,8 +9,11 @@ import {
   SvgLockOpen,
 } from '@actual-app/components/icons/v1';
 import { SvgNotesPaper } from '@actual-app/components/icons/v2';
+import { InlineField } from '@actual-app/components/inline-field';
+import { Input } from '@actual-app/components/input';
 import { Menu } from '@actual-app/components/menu';
 import { Popover } from '@actual-app/components/popover';
+import { Select } from '@actual-app/components/select';
 import { styles } from '@actual-app/components/styles';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
@@ -54,6 +57,9 @@ export function AccountMenuModal({
   const [currentAccountName, setCurrentAccountName] = useState(
     account?.name || t('New Account'),
   );
+  const [conversionFeePercent, setConversionFeePercent] = useState(
+    String(account?.conversion_fee_percent ?? 0),
+  );
 
   const onRename = (newName: string) => {
     newName = newName.trim();
@@ -90,6 +96,24 @@ export function AccountMenuModal({
     }
 
     onEditNotes?.(account.id);
+  };
+
+  const onConversionFeeUpdate = (value: string) => {
+    if (!account) {
+      return;
+    }
+    const parsedValue = Number(value);
+    if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+      setConversionFeePercent(String(account.conversion_fee_percent ?? 0));
+      return;
+    }
+
+    const normalizedValue = Math.min(parsedValue, 100);
+    setConversionFeePercent(String(normalizedValue));
+    onSave?.({
+      ...account,
+      conversion_fee_percent: normalizedValue,
+    });
   };
 
   const buttonStyle: CSSProperties = {
@@ -148,6 +172,43 @@ export function AccountMenuModal({
               flexDirection: 'column',
             }}
           >
+            <InlineField
+              label={t('Exchange rate source')}
+              width="100%"
+              style={{ paddingBottom: 10 }}
+            >
+              <Select
+                value={account.exchange_rate_provider ?? 'frankfurter'}
+                onChange={value =>
+                  onSave?.({
+                    ...account,
+                    exchange_rate_provider:
+                      value === 'bank-of-israel'
+                        ? 'bank-of-israel'
+                        : 'frankfurter',
+                  })
+                }
+                options={[
+                  ['frankfurter', t('Frankfurter')],
+                  ['bank-of-israel', t('Bank of Israel')],
+                ]}
+                style={{ flex: 1 }}
+              />
+            </InlineField>
+            <InlineField
+              label={t('Currency conversion fee (%)')}
+              width="100%"
+              style={{ paddingBottom: 10 }}
+            >
+              <Input
+                value={conversionFeePercent}
+                inputMode="decimal"
+                onChangeValue={setConversionFeePercent}
+                onUpdate={onConversionFeeUpdate}
+                aria-label={t('Currency conversion fee percentage')}
+                style={{ flex: 1 }}
+              />
+            </InlineField>
             <View
               style={{
                 overflowY: 'auto',

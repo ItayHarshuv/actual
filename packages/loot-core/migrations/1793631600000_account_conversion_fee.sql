@@ -1,0 +1,5 @@
+BEGIN TRANSACTION;
+
+ALTER TABLE accounts ADD COLUMN conversion_fee_percent REAL DEFAULT 0;
+
+COMMIT;
