@@ -121,7 +121,6 @@ import type {
   TableProps,
 } from '@desktop-client/components/table';
 import {
-  asPaymentAmount,
   clearTransactionCurrency,
   convertForeignAmount,
   convertMainAmountToForeign,
@@ -1131,7 +1130,11 @@ const Transaction = memo(function Transaction({
         Number.isFinite(exchangeRate) &&
         exchangeRate > 0
       ) {
-        const originalAmount = asPaymentAmount(amountToInteger(parsedAmount));
+        const enteredAmount = amountToInteger(parsedAmount);
+        const originalAmount =
+          originalTransaction.amount < 0
+            ? -Math.abs(enteredAmount)
+            : Math.abs(enteredAmount);
         const updatedTransaction = {
           ...originalTransaction,
           amount: convertForeignAmount(
@@ -1249,12 +1252,10 @@ const Transaction = memo(function Transaction({
       ) {
         const exchangeRate = Number(deserialized.exchange_rate);
         if (Number.isFinite(exchangeRate) && exchangeRate > 0) {
-          const paymentAmount = asPaymentAmount(deserialized.amount);
           const updatedTransaction = {
             ...deserialized,
-            amount: paymentAmount,
             original_amount: convertMainAmountToForeign(
-              paymentAmount,
+              deserialized.amount,
               exchangeRate,
               conversionFeePercent,
             ),

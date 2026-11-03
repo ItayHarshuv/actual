@@ -28,24 +28,19 @@ export async function setTransactionCurrencyAmount(
     date: transaction.date,
     provider: exchangeRateProvider,
   });
-  const paymentAmount = asPaymentAmount(originalAmount);
 
   return {
     ...transaction,
     amount: convertForeignAmount(
-      paymentAmount,
+      originalAmount,
       exchangeRate.rate,
       conversionFeePercent,
     ),
-    original_amount: paymentAmount,
+    original_amount: originalAmount,
     original_currency: originalCurrency,
     exchange_rate: String(exchangeRate.rate),
     exchange_rate_date: exchangeRate.date,
   };
-}
-
-export function asPaymentAmount(amount: IntegerAmount): IntegerAmount {
-  return -Math.abs(amount);
 }
 
 export function convertForeignAmount(

@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TransactionEntity } from 'loot-core/types/models';
 
 import {
-  asPaymentAmount,
   convertForeignAmount,
   convertMainAmountToForeign,
   setTransactionCurrencyAmount,
@@ -48,7 +47,7 @@ describe('setTransactionCurrencyAmount', () => {
     expect(converted.exchange_rate_date).toBe('2026-10-30');
   });
 
-  it('always stores foreign-currency transactions as payments', async () => {
+  it('preserves the direction of foreign-currency transactions', async () => {
     send.mockResolvedValue({
       source: 'EUR',
       target: 'USD',
@@ -69,8 +68,8 @@ describe('setTransactionCurrencyAmount', () => {
       'USD',
     );
 
-    expect(converted.original_amount).toBe(-1000);
-    expect(converted.amount).toBe(-1200);
+    expect(converted.original_amount).toBe(1000);
+    expect(converted.amount).toBe(1200);
   });
 
   it('applies an account fee to expenses and supports reverse editing', () => {
@@ -105,12 +104,5 @@ describe('setTransactionCurrencyAmount', () => {
       date: '2026-10-30',
       provider: 'bank-of-israel',
     });
-  });
-});
-
-describe('asPaymentAmount', () => {
-  it('keeps payments negative regardless of the entered sign', () => {
-    expect(asPaymentAmount(1000)).toBe(-1000);
-    expect(asPaymentAmount(-1000)).toBe(-1000);
   });
 });
