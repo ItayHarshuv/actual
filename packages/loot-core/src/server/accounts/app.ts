@@ -1428,6 +1428,7 @@ export type ImportTransactionsResult = bankSync.ReconcileTransactionsResult & {
   errors: Array<{
     message: string;
   }>;
+  statementReconciliation?: bankSync.StatementReconciliationResult;
 };
 
 async function importTransactions({
@@ -1456,11 +1457,22 @@ async function importTransactions({
       false,
       opts?.reimportDeleted,
     );
+    const statementReconciliation =
+      !isPreview && opts?.statementTargetBalance !== undefined
+        ? await bankSync.reconcileStatement(
+            accountId,
+            transactions
+              .map(transaction => transaction.imported_id)
+              .filter((id): id is string => Boolean(id)),
+            opts.statementTargetBalance,
+          )
+        : undefined;
     return {
       errors: [],
       added: reconciled.added,
       updated: reconciled.updated,
       updatedPreview: reconciled.updatedPreview,
+      statementReconciliation,
     };
   } catch (err) {
     if (err instanceof TransactionError) {

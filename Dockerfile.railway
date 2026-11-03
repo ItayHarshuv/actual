@@ -1,0 +1,46 @@
+FROM node:22-bookworm AS build
+
+RUN corepack enable \
+    && apt-get update \
+    && apt-get install -y python3 make g++ openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+
+RUN yarn install --immutable
+RUN yarn build:server
+
+FROM build AS builder
+
+RUN yarn workspaces focus @actual-app/sync-server --production
+
+# Replace workspace links with deployable frontend files.
+RUN rm -rf node_modules/@actual-app/web \
+             node_modules/@actual-app/sync-server \
+    && mkdir -p node_modules/@actual-app/web \
+    && cp packages/desktop-client/package.json \
+          node_modules/@actual-app/web/package.json \
+    && cp -r packages/desktop-client/build \
+             node_modules/@actual-app/web/build
+
+FROM node:22-bookworm-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV ACTUAL_DATA_DIR=/data
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/sync-server/package.json ./
+COPY --from=builder /app/packages/sync-server/build ./
+
+RUN mkdir -p /data
+
+EXPOSE 5006
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "app.js"]

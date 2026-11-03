@@ -51,6 +51,9 @@ type StructuredTransaction = {
   payee_name: string;
   imported_payee: string;
   notes: string;
+  imported_id?: string;
+  original_amount?: number;
+  original_currency?: string;
 };
 
 // CSV files return raw data that are not guaranteed to be StructuredTransactions
@@ -59,9 +62,18 @@ type CsvTransaction = Record<string, string> | string[];
 type Transaction = StructuredTransaction | CsvTransaction;
 
 type ParseError = { message: string; internal: string };
+export type ParsedStatement = {
+  type: 'hapoalim-visa';
+  accountLastFour: string;
+  paymentDate: string;
+  targetBalance: number;
+  currency: 'ILS';
+};
+
 export type ParseFileResult = {
   errors: ParseError[];
   transactions?: Transaction[];
+  statement?: ParsedStatement;
 };
 
 export type ParseFileOptions = {
@@ -113,6 +125,19 @@ async function parseCSV(
   const errors = Array<ParseError>();
   let contents = await fs.readFile(filepath);
 
+  const statementDelimiters = new Set([
+    options.delimiter || ',',
+    ',',
+    ';',
+    '\t',
+  ]);
+  for (const delimiter of statementDelimiters) {
+    const statement = parseHapoalimVisaCSV(contents, delimiter);
+    if (statement) {
+      return statement;
+    }
+  }
+
   const skipStart = Math.max(0, options.skipStartLines || 0);
   const skipEnd = Math.max(0, options.skipEndLines || 0);
 
@@ -153,6 +178,148 @@ async function parseCSV(
   }
 
   return { errors, transactions: data };
+}
+
+function parseHapoalimVisaCSV(
+  contents: string,
+  delimiter: string,
+): ParseFileResult | null {
+  let rows: string[][];
+  try {
+    rows = csv2json(contents, {
+      bom: true,
+      delimiter,
+      quote: '"',
+      trim: true,
+      relax_column_count: true,
+      skip_empty_lines: false,
+    });
+  } catch {
+    return null;
+  }
+
+  const title = rows[0]?.[0] || '';
+  const titleMatch = title.match(/פירוט עסקאות.*כרטיס ויזה.*מסתיים ב-?(\d{4})/);
+  if (!titleMatch) {
+    return null;
+  }
+
+  const summary = rows.find(row => row[0]?.includes('עסקאות לחיוב'))?.[0];
+  const summaryMatch = summary?.match(
+    /עסקאות לחיוב ב-(\d{1,2}\/\d{1,2}\/\d{4}):\s*([₪\d,.\s-]+)/,
+  );
+  const headerIndex = rows.findIndex(
+    row =>
+      row[0]?.includes('תאריך') &&
+      row[1]?.includes('שם בית עסק') &&
+      row[3]?.includes('סכום') &&
+      row[3]?.includes('חיוב'),
+  );
+  if (!summaryMatch || headerIndex === -1) {
+    return null;
+  }
+
+  const paymentDate = parseIsraeliDate(summaryMatch[1]);
+  const statementTotal = looselyParseAmount(summaryMatch[2]);
+  if (!paymentDate || statementTotal == null) {
+    return null;
+  }
+
+  const transactions: StructuredTransaction[] = [];
+  for (let index = headerIndex + 1; index < rows.length; index++) {
+    const row = rows[index];
+    const date = parseIsraeliDate(row[0]);
+    const payee = row[1]?.trim();
+    const chargedAmount = looselyParseAmount(row[3] || '');
+    if (!date || !payee || chargedAmount == null) {
+      continue;
+    }
+
+    const originalAmount = looselyParseAmount(row[2] || '');
+    const originalCurrency = getStatementCurrency(row[2]);
+    const notes = [row[4], row[5], row[6]].filter(Boolean).join(' · ');
+
+    transactions.push({
+      amount: -Math.abs(chargedAmount),
+      date,
+      payee_name: payee,
+      imported_payee: payee,
+      notes,
+      imported_id: `hapoalim-visa-${titleMatch[1]}-${paymentDate}-${index - headerIndex}`,
+      ...(originalAmount != null &&
+        originalCurrency &&
+        originalCurrency !== 'ILS' && {
+          original_amount: -Math.abs(originalAmount),
+          original_currency: originalCurrency,
+        }),
+    });
+  }
+
+  if (transactions.length === 0) {
+    return null;
+  }
+
+  const importedTotal = transactions.reduce(
+    (total, transaction) => total - transaction.amount,
+    0,
+  );
+  if (
+    Math.round(importedTotal * 100) !==
+    Math.round(Math.abs(statementTotal) * 100)
+  ) {
+    return {
+      errors: [
+        {
+          message: 'Statement total does not match its transactions',
+          internal: `Expected ${statementTotal}, parsed ${importedTotal}`,
+        },
+      ],
+      transactions: [],
+    };
+  }
+
+  return {
+    errors: [],
+    transactions,
+    statement: {
+      type: 'hapoalim-visa',
+      accountLastFour: titleMatch[1],
+      paymentDate,
+      targetBalance: -Math.abs(statementTotal),
+      currency: 'ILS',
+    },
+  };
+}
+
+function parseIsraeliDate(value: string | undefined): string | null {
+  const match = value?.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, day, month, year] = match;
+  const parsed = new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day)),
+  );
+  if (
+    parsed.getUTCFullYear() !== Number(year) ||
+    parsed.getUTCMonth() !== Number(month) - 1 ||
+    parsed.getUTCDate() !== Number(day)
+  ) {
+    return null;
+  }
+
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+}
+
+function getStatementCurrency(value: string | undefined): string | null {
+  if (value?.includes('$')) {
+    return 'USD';
+  }
+  if (value?.includes('₪')) {
+    return 'ILS';
+  }
+  return null;
 }
 
 async function parseQIF(

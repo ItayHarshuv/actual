@@ -13,6 +13,12 @@ export type ImportTransactionEntity = {
    * For example, USD amount of $120.30 would be 12030 */
   amount?: number;
 
+  /** Original amount before currency conversion, as an integer */
+  original_amount?: number | null;
+
+  /** ISO 4217 currency code for original_amount */
+  original_currency?: string | null;
+
   /** In a create/import request, this overrides payee_name.
    * Should be an existing payee ID */
   payee?: string | null;

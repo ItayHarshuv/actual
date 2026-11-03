@@ -19,7 +19,10 @@ import { View } from '@actual-app/components/view';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { send } from 'loot-core/platform/client/connection';
-import type { ParseFileOptions } from 'loot-core/server/transactions/import/parse-file';
+import type {
+  ParsedStatement,
+  ParseFileOptions,
+} from 'loot-core/server/transactions/import/parse-file';
 import { amountToInteger } from 'loot-core/shared/util';
 
 import { DateFormatSelect } from './DateFormatSelect';
@@ -205,6 +208,7 @@ export function ImportTransactionsModal({
   const [parsedTransactions, setParsedTransactions] = useState<
     ImportTransaction[]
   >([]);
+  const [statement, setStatement] = useState<ParsedStatement | null>(null);
   const [filetype, setFileType] = useState('unknown');
   const [fieldMappings, setFieldMappings] = useState<FieldMapping | null>(null);
   const [splitMode, setSplitMode] = useState(false);
@@ -273,7 +277,7 @@ export function ImportTransactionsModal({
       const previewTransactions = [];
       const inOutModeEnabled = isOfxFile(filetype) ? false : inOutMode;
       const getTransDate: (trans: ImportTransaction) => string | null =
-        isOfxFile(filetype)
+        isStructuredFile(filetype)
           ? trans => trans.date ?? null
           : trans => parseDate(trans.date, parseDateFormat);
 
@@ -342,6 +346,9 @@ export function ImportTransactionsModal({
           ...finalTransaction,
           date,
           amount: amountToInteger(amount),
+          ...(typeof trans.original_amount === 'number' && {
+            original_amount: amountToInteger(trans.original_amount),
+          }),
           cleared: clearOnImport,
         });
       }
@@ -359,13 +366,18 @@ export function ImportTransactionsModal({
       setFilename(filename);
       setFileType(filetype);
 
-      const { errors, transactions: parsedTransactions = [] } = await send(
-        'transactions-parse-file',
-        {
-          filepath: filename,
-          options,
-        },
-      );
+      const {
+        errors,
+        transactions: parsedTransactions = [],
+        statement = null,
+      } = await send('transactions-parse-file', {
+        filepath: filename,
+        options,
+      });
+      setStatement(statement);
+      if (statement) {
+        setFileType(statement.type);
+      }
 
       let index = 0;
       const transactions = parsedTransactions.map(trans => {
@@ -599,10 +611,9 @@ export function ImportTransactionsModal({
 
       trans = fieldMappings ? applyFieldMappings(trans, fieldMappings) : trans;
 
-      const date =
-        isOfxFile(filetype) || isCamtFile(filetype)
-          ? trans.date
-          : parseDate(trans.date, parseDateFormat);
+      const date = isStructuredFile(filetype)
+        ? trans.date
+        : parseDate(trans.date, parseDateFormat);
       if (date == null) {
         errorMessage = t(
           'Unable to parse date {{date}} with given date format',
@@ -656,6 +667,9 @@ export function ImportTransactionsModal({
         ...finalTransaction,
         date,
         amount: amountToInteger(amount),
+        ...(typeof trans.original_amount === 'number' && {
+          original_amount: amountToInteger(trans.original_amount),
+        }),
         cleared: clearOnImport,
         notes: importNotes ? finalTransaction.notes : null,
       });
@@ -667,7 +681,7 @@ export function ImportTransactionsModal({
       return;
     }
 
-    if (!isOfxFile(filetype) && !isCamtFile(filetype)) {
+    if (!isStructuredFile(filetype)) {
       const key = `parse-date-${accountId}-${filetype}`;
       savePrefs({ [key]: parseDateFormat });
     }
@@ -720,6 +734,10 @@ export function ImportTransactionsModal({
         transactions: finalTransactions,
         reconcile,
         reimportDeleted,
+        statementTargetBalance:
+          statement != null
+            ? amountToInteger(statement.targetBalance)
+            : undefined,
       },
       {
         onSuccess: async didChange => {
@@ -741,7 +759,7 @@ export function ImportTransactionsModal({
 
   const onImportPreview = useEffectEvent(async () => {
     // Filter by start date before preview and deduplication
-    const isPreParsed = isOfxFile(filetype) || isCamtFile(filetype);
+    const isPreParsed = isStructuredFile(filetype);
     const filteredTransactions = filterByStartDate(
       parsedTransactions,
       startDate,
@@ -950,6 +968,15 @@ export function ImportTransactionsModal({
                 )}
               />
             </View>
+          )}
+          {statement && (
+            <Text style={{ marginTop: 10 }}>
+              <Trans>
+                Visa statement ending in {{ card: statement.accountLastFour }}:
+                reconcile to {{ balance: statement.targetBalance.toFixed(2) }}{' '}
+                ILS
+              </Trans>
+            </Text>
           )}
           {error && error.parsed && (
             <View
@@ -1350,4 +1377,10 @@ function isOfxFile(fileType: string) {
 
 function isCamtFile(fileType: string) {
   return fileType === 'xml';
+}
+
+function isStructuredFile(fileType: string) {
+  return (
+    isOfxFile(fileType) || isCamtFile(fileType) || fileType === 'hapoalim-visa'
+  );
 }

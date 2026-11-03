@@ -273,6 +273,7 @@ type ImportTransactionsPayload = {
   transactions: TransactionEntity[];
   reconcile: boolean;
   reimportDeleted?: boolean;
+  statementTargetBalance?: number;
 };
 
 export function useImportTransactionsMutation() {
@@ -286,6 +287,7 @@ export function useImportTransactionsMutation() {
       transactions,
       reconcile,
       reimportDeleted,
+      statementTargetBalance,
     }: ImportTransactionsPayload) => {
       if (!reconcile) {
         await send('api/transactions-add', {
@@ -300,11 +302,17 @@ export function useImportTransactionsMutation() {
         errors = [],
         added,
         updated,
+        statementReconciliation,
       } = await send('transactions-import', {
         accountId,
         transactions,
         isPreview: false,
-        opts: reimportDeleted !== undefined ? { reimportDeleted } : undefined,
+        opts: {
+          ...(reimportDeleted !== undefined && { reimportDeleted }),
+          ...(statementTargetBalance !== undefined && {
+            statementTargetBalance,
+          }),
+        },
       });
 
       errors.forEach(error => {
@@ -317,6 +325,29 @@ export function useImportTransactionsMutation() {
           }),
         );
       });
+
+      if (statementReconciliation?.reconciled) {
+        dispatch(
+          addNotification({
+            notification: {
+              type: 'message',
+              message: t('Statement reconciled and transactions locked.'),
+            },
+          }),
+        );
+      } else if (statementReconciliation) {
+        dispatch(
+          addNotification({
+            notification: {
+              type: 'warning',
+              message: t(
+                'Transactions imported, but the statement was not locked because the cleared balance differs by {{difference}}.',
+                { difference: statementReconciliation.difference / 100 },
+              ),
+            },
+          }),
+        );
+      }
 
       dispatch(
         setNewTransactions({

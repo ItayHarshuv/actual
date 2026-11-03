@@ -1,0 +1,12 @@
+.git
+.lage
+.yarn/cache
+node_modules
+**/node_modules
+**/build
+**/dist
+**/lib-dist
+**/coverage
+packages/desktop-client/playwright-report
+packages/desktop-client/test-results
+actual-data

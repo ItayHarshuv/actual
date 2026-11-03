@@ -72,6 +72,37 @@ async function importFileWithRealTime(
 }
 
 describe('File import', () => {
+  test('parses a Hapoalim Visa CSV statement', async () => {
+    const result = await parseFile(
+      __dirname + '/../../../mocks/files/hapoalim-visa.csv',
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.statement).toEqual({
+      type: 'hapoalim-visa',
+      accountLastFour: '3619',
+      paymentDate: '2026-09-02',
+      targetBalance: -833,
+      currency: 'ILS',
+    });
+    expect(result.transactions).toHaveLength(3);
+    expect(result.transactions?.[0]).toMatchObject({
+      amount: -113,
+      date: '2026-08-31',
+      payee_name: 'מסעדה',
+      imported_id: 'hapoalim-visa-3619-2026-09-02-1',
+    });
+    expect(result.transactions?.[1]).toMatchObject({
+      amount: -360,
+      original_amount: -100,
+      original_currency: 'USD',
+      imported_id: 'hapoalim-visa-3619-2026-09-02-2',
+    });
+    expect(result.transactions?.[2]).toMatchObject({
+      imported_id: 'hapoalim-visa-3619-2026-09-02-3',
+    });
+  });
+
   test('qif import works', async () => {
     await prefs.loadPrefs();
     await db.insertAccount({ id: 'one', name: 'one' });

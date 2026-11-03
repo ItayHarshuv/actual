@@ -504,6 +504,11 @@ export type ReconcileTransactionsResult = {
   }>;
 };
 
+export type StatementReconciliationResult = {
+  reconciled: boolean;
+  difference: number;
+};
+
 export async function reconcileTransactions(
   acctId,
   transactions,
@@ -558,6 +563,10 @@ export async function reconcileTransactions(
         imported_payee: trans.imported_payee || null,
         notes: existing.notes || trans.notes || null,
         cleared: existing.cleared || trans.cleared || false,
+        original_amount:
+          existing.original_amount ?? trans.original_amount ?? null,
+        original_currency:
+          existing.original_currency ?? trans.original_currency ?? null,
         raw_synced_data:
           existing.raw_synced_data ?? trans.raw_synced_data ?? null,
       };
@@ -662,6 +671,63 @@ export async function reconcileTransactions(
     updated: updated.map(trans => trans.id),
     updatedPreview,
   };
+}
+
+export async function reconcileStatement(
+  acctId: string,
+  importedIds: string[],
+  targetBalance: number,
+): Promise<StatementReconciliationResult> {
+  const balanceRow = await db.first<{ balance: number | null }>(
+    `SELECT SUM(amount) AS balance
+       FROM v_transactions_internal_alive
+      WHERE account = ? AND cleared = 1 AND is_parent = 0`,
+    [acctId],
+  );
+  const difference = targetBalance - (balanceRow?.balance ?? 0);
+  if (difference !== 0 || importedIds.length === 0) {
+    return { reconciled: false, difference };
+  }
+
+  const placeholders = importedIds.map(() => '?').join(', ');
+  const statementTransactions = await db.all<
+    Pick<db.DbViewTransactionInternal, 'id' | 'is_parent'>
+  >(
+    `SELECT id, is_parent
+       FROM v_transactions_internal_alive
+      WHERE account = ? AND imported_id IN (${placeholders})`,
+    [acctId, ...importedIds],
+  );
+  if (statementTransactions.length === 0) {
+    return { reconciled: false, difference };
+  }
+
+  const parentIds = statementTransactions
+    .filter(transaction => transaction.is_parent)
+    .map(transaction => transaction.id);
+  const childTransactions =
+    parentIds.length === 0
+      ? []
+      : await db.all<Pick<db.DbViewTransactionInternal, 'id'>>(
+          `SELECT id
+             FROM v_transactions_internal_alive
+            WHERE parent_id IN (${parentIds.map(() => '?').join(', ')})`,
+          parentIds,
+        );
+  const transactionIds = new Set([
+    ...statementTransactions.map(transaction => transaction.id),
+    ...childTransactions.map(transaction => transaction.id),
+  ]);
+
+  await batchUpdateTransactions({
+    updated: [...transactionIds].map(id => ({ id, reconciled: true })),
+  });
+  await db.updateAccount({
+    id: acctId,
+    last_reconciled: Date.now().toString(),
+  });
+
+  return { reconciled: true, difference: 0 };
 }
 
 export async function matchTransactions(

@@ -27,6 +27,7 @@ export type ImportTransactionsOpts = {
   defaultCleared?: boolean;
   dryRun?: boolean;
   reimportDeleted?: boolean;
+  statementTargetBalance?: number;
 };
 
 export type ApiHandlers = {

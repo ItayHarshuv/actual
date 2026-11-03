@@ -11,6 +11,7 @@ import { insertRule, loadRules } from '../transactions/transaction-rules';
 
 import {
   addTransactions,
+  reconcileStatement,
   reconcileTransactions,
   simpleFinBatchSync,
 } from './sync';
@@ -77,6 +78,65 @@ async function getAllPayees() {
 }
 
 describe('Account sync', () => {
+  test('reconciles only transactions from a balanced statement', async () => {
+    const { id } = await prepareDatabase();
+    await reconcileTransactions(id, [
+      {
+        date: '2026-08-30',
+        amount: -10000,
+        imported_id: 'statement-1',
+      },
+      {
+        date: '2026-08-31',
+        amount: -20000,
+        imported_id: 'statement-2',
+      },
+      {
+        date: '2026-09-01',
+        amount: 5000,
+        imported_id: 'outside-statement',
+      },
+    ]);
+
+    await expect(
+      reconcileStatement(id, ['statement-1', 'statement-2'], -25000),
+    ).resolves.toEqual({ reconciled: true, difference: 0 });
+
+    const transactions = await getAllTransactions();
+    expect(
+      transactions
+        .filter(transaction =>
+          ['statement-1', 'statement-2'].includes(transaction.imported_id),
+        )
+        .every(transaction => transaction.reconciled === 1),
+    ).toBe(true);
+    expect(
+      transactions.find(
+        transaction => transaction.imported_id === 'outside-statement',
+      ).reconciled,
+    ).toBe(0);
+    expect((await db.getAccount(id)).last_reconciled).not.toBeNull();
+  });
+
+  test('does not lock a statement when the cleared balance differs', async () => {
+    const { id } = await prepareDatabase();
+    await reconcileTransactions(id, [
+      {
+        date: '2026-08-31',
+        amount: -20000,
+        imported_id: 'statement-1',
+      },
+    ]);
+
+    await expect(
+      reconcileStatement(id, ['statement-1'], -25000),
+    ).resolves.toEqual({ reconciled: false, difference: -5000 });
+
+    const [transaction] = await getAllTransactions();
+    expect(transaction.reconciled).toBe(0);
+    expect((await db.getAccount(id)).last_reconciled).toBeNull();
+  });
+
   test('reconcile creates payees correctly', async () => {
     const { id } = await prepareDatabase();
 
