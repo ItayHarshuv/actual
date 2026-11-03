@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Label } from '@actual-app/components/label';
 import { styles } from '@actual-app/components/styles';
+import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
@@ -86,6 +87,7 @@ type TransactionListWithBalancesProps = {
   balanceUncleared?:
     | Binding<'category', 'balanceUncleared'>
     | Binding<'account', 'balanceUncleared'>;
+  balanceSubtext?: string;
   showRunningBalances?: boolean;
   runningBalances?: Map<TransactionEntity['id'], IntegerAmount>;
   searchPlaceholder: string;
@@ -103,6 +105,7 @@ export function TransactionListWithBalances({
   balance,
   balanceCleared,
   balanceUncleared,
+  balanceSubtext,
   showRunningBalances,
   runningBalances,
   searchPlaceholder = 'Search...',
@@ -135,9 +138,10 @@ export function TransactionListWithBalances({
                 balance={balance}
                 balanceCleared={balanceCleared}
                 balanceUncleared={balanceUncleared}
+                balanceSubtext={balanceSubtext}
               />
             ) : (
-              <Balance balance={balance} />
+              <Balance balance={balance} balanceSubtext={balanceSubtext} />
             )}
           </View>
           <TransactionSearchInput
@@ -191,12 +195,14 @@ type BalanceWithClearedProps = {
     TransactionListWithBalancesProps['balanceCleared']
   >;
   balance: TransactionListWithBalancesProps['balance'];
+  balanceSubtext?: string;
 };
 
 function BalanceWithCleared({
   balanceUncleared,
   balanceCleared,
   balance,
+  balanceSubtext,
 }: BalanceWithClearedProps) {
   const { t } = useTranslation();
   const unclearedAmount = useSheetValue<
@@ -233,7 +239,7 @@ function BalanceWithCleared({
           )}
         </TransactionListBalanceCellValue>
       </View>
-      <Balance balance={balance} />
+      <Balance balance={balance} balanceSubtext={balanceSubtext} />
       <View
         style={{
           display: !unclearedAmount ? 'none' : undefined,
@@ -267,9 +273,10 @@ function BalanceWithCleared({
 
 type BalanceProps = {
   balance: TransactionListWithBalancesProps['balance'];
+  balanceSubtext?: string;
 };
 
-function Balance({ balance }: BalanceProps) {
+function Balance({ balance, balanceSubtext }: BalanceProps) {
   const { t } = useTranslation();
   return (
     <View style={{ flexBasis: '33%' }}>
@@ -293,6 +300,19 @@ function Balance({ balance }: BalanceProps) {
           />
         )}
       </TransactionListBalanceCellValue>
+      {balanceSubtext && (
+        <Text
+          style={{
+            ...styles.tnum,
+            color: theme.pageTextSubdued,
+            fontSize: 11,
+            textAlign: 'center',
+          }}
+          data-testid="transactions-balance-account-currency"
+        >
+          {balanceSubtext}
+        </Text>
+      )}
     </View>
   );
 }

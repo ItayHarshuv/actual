@@ -36,6 +36,7 @@ import {
   CellValue,
   CellValueText,
 } from '@desktop-client/components/spreadsheet/CellValue';
+import { formatCurrencyAmount } from '@desktop-client/currency/transactionCurrency';
 import { useAccounts } from '@desktop-client/hooks/useAccounts';
 import { useFailedAccounts } from '@desktop-client/hooks/useFailedAccounts';
 import { useLocalPref } from '@desktop-client/hooks/useLocalPref';
@@ -147,10 +148,15 @@ function AccountListItem({
   ...props
 }: AccountListItemProps) {
   const { value: account } = props;
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
 
   if (!account) {
     return null;
   }
+
+  const accountCurrency = account.currency || defaultCurrencyCode || '';
+  const isForeignCurrency =
+    !!accountCurrency && accountCurrency !== defaultCurrencyCode;
 
   return (
     <ListBoxItem
@@ -213,22 +219,39 @@ function AccountListItem({
               {account.name}
             </TextOneLine>
           </View>
-          <CellValue binding={getBalanceQuery(account.id)} type="financial">
-            {props => (
-              <CellValueText<'account', 'balance'>
-                {...props}
+          <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>
+            <CellValue binding={getBalanceQuery(account.id)} type="financial">
+              {props => (
+                <CellValueText<'account', 'balance'>
+                  {...props}
+                  style={{
+                    fontSize: 16,
+                    ...makeAmountFullStyle(props.value, {
+                      positiveColor: theme.numberPositive,
+                      negativeColor: theme.numberNegative,
+                      zeroColor: theme.numberNeutral,
+                    }),
+                  }}
+                  data-testid="account-balance"
+                />
+              )}
+            </CellValue>
+            {isForeignCurrency && (
+              <Text
                 style={{
-                  fontSize: 16,
-                  ...makeAmountFullStyle(props.value, {
-                    positiveColor: theme.numberPositive,
-                    negativeColor: theme.numberNegative,
-                    zeroColor: theme.numberNeutral,
-                  }),
+                  ...styles.tnum,
+                  color: theme.pageTextSubdued,
+                  fontSize: 11,
                 }}
-                data-testid="account-balance"
-              />
+                data-testid="account-balance-account-currency"
+              >
+                {formatCurrencyAmount(
+                  account.currency_native_balance ?? 0,
+                  accountCurrency,
+                )}
+              </Text>
             )}
-          </CellValue>
+          </View>
         </Button>
       )}
     </ListBoxItem>

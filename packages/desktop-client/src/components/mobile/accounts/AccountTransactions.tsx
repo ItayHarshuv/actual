@@ -10,6 +10,7 @@ import type { AccountEntity, TransactionEntity } from 'loot-core/types/models';
 import { useSyncAndDownloadMutation } from '@desktop-client/accounts';
 import { markAccountRead } from '@desktop-client/accounts/accountsSlice';
 import { TransactionListWithBalances } from '@desktop-client/components/mobile/transactions/TransactionListWithBalances';
+import { formatCurrencyAmount } from '@desktop-client/currency/transactionCurrency';
 import { useAccountPreviewTransactions } from '@desktop-client/hooks/useAccountPreviewTransactions';
 import { SchedulesProvider } from '@desktop-client/hooks/useCachedSchedules';
 import { useDateFormat } from '@desktop-client/hooks/useDateFormat';
@@ -56,6 +57,10 @@ function TransactionListWithPreviews({
 
   const [showRunningBalances] = useSyncedPref(`show-balances-${account.id}`);
   const [hideReconciled] = useSyncedPref(`hide-reconciled-${account.id}`);
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
+  const accountCurrency = account.currency || defaultCurrencyCode || '';
+  const isForeignCurrency =
+    !!accountCurrency && accountCurrency !== defaultCurrencyCode;
 
   const baseTransactionsQuery = useCallback(() => {
     let query = queries
@@ -216,6 +221,16 @@ function TransactionListWithPreviews({
       balance={balanceBindings.balance}
       balanceCleared={balanceBindings.cleared}
       balanceUncleared={balanceBindings.uncleared}
+      balanceSubtext={
+        isForeignCurrency
+          ? t('{{amount}} in account currency', {
+              amount: formatCurrencyAmount(
+                account.currency_native_balance ?? 0,
+                accountCurrency,
+              ),
+            })
+          : undefined
+      }
       runningBalances={allBalances}
       showRunningBalances={shouldCalculateRunningBalances}
       isLoadingMore={isLoadingMoreTransactions}
