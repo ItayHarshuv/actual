@@ -625,6 +625,13 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
     }, []);
 
     const [transaction, ...childTransactions] = transactions;
+    const transactionAccount = accounts.find(
+      account => account.id === unserializedTransactions[0]?.account,
+    );
+    const displayedCurrency =
+      transaction.original_currency ||
+      transactionAccount?.currency ||
+      defaultCurrencyCode;
 
     const { editingField, onRequestActiveEdit, onClearActiveEdit } =
       useSingleActiveEditForm()!;
@@ -1106,7 +1113,7 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
               <>
                 <Select
                   aria-label={t('Transaction currency')}
-                  value={transaction.original_currency || defaultCurrencyCode}
+                  value={displayedCurrency}
                   onChange={currencyCode =>
                     void onUpdateInner(
                       transaction,
@@ -1507,6 +1514,14 @@ function TransactionEditUnconnected({
 
   useEffect(() => {
     if (isAdding.current) {
+      const accountId =
+        searchParamAccount ||
+        locationState?.accountId ||
+        lastTransaction?.account ||
+        null;
+      const accountCurrency = accounts.find(
+        account => account.id === accountId,
+      )?.currency;
       setTransactions([
         {
           id: 'temp',
@@ -1518,11 +1533,11 @@ function TransactionEditUnconnected({
             return lastTransaction?.date || monthUtils.currentDay();
           })(),
           payee: searchParamPayee,
-          account:
-            searchParamAccount ||
-            locationState?.accountId ||
-            lastTransaction?.account ||
-            null,
+          account: accountId,
+          original_currency:
+            accountCurrency && accountCurrency !== defaultCurrencyCode
+              ? accountCurrency
+              : null,
           category: searchParamCategory || locationState?.categoryId || null,
           amount: -amountToInteger(
             parseFloat(searchParams.get('amount') || '') || 0,
@@ -1533,6 +1548,8 @@ function TransactionEditUnconnected({
       ]);
     }
   }, [
+    accounts,
+    defaultCurrencyCode,
     locationState?.accountId,
     locationState?.categoryId,
     lastTransaction,

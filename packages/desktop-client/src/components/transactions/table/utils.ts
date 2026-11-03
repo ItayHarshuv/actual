@@ -140,6 +140,7 @@ export function makeTemporaryTransactions(
   currentAccountId: AccountEntity['id'] | null | undefined,
   currentCategoryId: CategoryEntity['id'] | null | undefined,
   lastDate?: string | null,
+  originalCurrency?: string | null,
 ): TransactionEntity[] {
   return [
     {
@@ -148,6 +149,7 @@ export function makeTemporaryTransactions(
       // TODO: consider making this default to an empty string
       account: (currentAccountId || null) as string,
       category: currentCategoryId || undefined,
+      original_currency: originalCurrency || null,
       cleared: false,
       // TODO: either make this nullable or find a way to make this not null
       amount: null as unknown as number,

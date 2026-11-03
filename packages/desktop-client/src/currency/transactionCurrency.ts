@@ -1,10 +1,13 @@
 import { send } from 'loot-core/platform/client/connection';
-import { getCurrency } from 'loot-core/shared/currencies';
+import {
+  exchangeRateCurrencies,
+  getCurrency,
+} from 'loot-core/shared/currencies';
 import { integerToAmount } from 'loot-core/shared/util';
 import type { IntegerAmount } from 'loot-core/shared/util';
 import type { AccountEntity, TransactionEntity } from 'loot-core/types/models';
 
-export const transactionCurrencyCodes = ['ILS', 'USD', 'EUR'] as const;
+export const transactionCurrencyCodes = exchangeRateCurrencies;
 
 export function isTransactionCurrency(
   code: string | undefined,
@@ -80,14 +83,21 @@ export function formatOriginalAmount(transaction: TransactionEntity): string {
     return '';
   }
 
-  const currency = getCurrency(transaction.original_currency);
-  const amount = integerToAmount(
+  return formatCurrencyAmount(
     transaction.original_amount,
-    currency.decimalPlaces,
+    transaction.original_currency,
   );
+}
+
+export function formatCurrencyAmount(
+  integerAmount: IntegerAmount,
+  currencyCode: string,
+): string {
+  const currency = getCurrency(currencyCode);
+  const amount = integerToAmount(integerAmount, currency.decimalPlaces);
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
-    currency: transaction.original_currency,
+    currency: currencyCode,
     minimumFractionDigits: currency.decimalPlaces,
     maximumFractionDigits: currency.decimalPlaces,
   }).format(amount);

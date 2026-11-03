@@ -793,6 +793,29 @@ class AccountInternal extends PureComponent<
     });
   };
 
+  onSaveAccountCurrency = (currency: string | null) => {
+    const account = this.props.accounts.find(
+      account => account.id === this.props.accountId,
+    );
+    if (!account) {
+      throw new Error(`Account with ID ${this.props.accountId} not found.`);
+    }
+    this.props.onUpdateAccount({ ...account, currency });
+  };
+
+  onSaveRevaluationCategory = (revaluationCategory: string | null) => {
+    const account = this.props.accounts.find(
+      account => account.id === this.props.accountId,
+    );
+    if (!account) {
+      throw new Error(`Account with ID ${this.props.accountId} not found.`);
+    }
+    this.props.onUpdateAccount({
+      ...account,
+      revaluation_category: revaluationCategory,
+    });
+  };
+
   onToggleExtraBalances = () => {
     this.props.setShowExtraBalances(!this.props.showExtraBalances);
   };
@@ -1843,6 +1866,8 @@ class AccountInternal extends PureComponent<
                 onSaveName={this.onSaveName}
                 onSaveConversionFee={this.onSaveConversionFee}
                 onSaveExchangeRateProvider={this.onSaveExchangeRateProvider}
+                onSaveAccountCurrency={this.onSaveAccountCurrency}
+                onSaveRevaluationCategory={this.onSaveRevaluationCategory}
                 saveNameError={this.state.nameError}
                 onReconcile={this.onReconcile}
                 onDoneReconciling={this.onDoneReconciling}

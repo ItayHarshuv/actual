@@ -15,9 +15,12 @@ import { Menu } from '@actual-app/components/menu';
 import { Popover } from '@actual-app/components/popover';
 import { Select } from '@actual-app/components/select';
 import { styles } from '@actual-app/components/styles';
+import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
+import { exchangeRateCurrencies } from 'loot-core/shared/currencies';
+import { integerToCurrency } from 'loot-core/shared/util';
 import type { AccountEntity } from 'loot-core/types/models';
 
 import {
@@ -28,8 +31,10 @@ import {
 } from '@desktop-client/components/common/Modal';
 import { Notes } from '@desktop-client/components/Notes';
 import { validateAccountName } from '@desktop-client/components/util/accountValidation';
+import { formatCurrencyAmount } from '@desktop-client/currency/transactionCurrency';
 import { useAccount } from '@desktop-client/hooks/useAccount';
 import { useAccounts } from '@desktop-client/hooks/useAccounts';
+import { useCategories } from '@desktop-client/hooks/useCategories';
 import { useNotes } from '@desktop-client/hooks/useNotes';
 import { useSyncedPref } from '@desktop-client/hooks/useSyncedPref';
 import type { Modal as ModalType } from '@desktop-client/modals/modalsSlice';
@@ -52,6 +57,8 @@ export function AccountMenuModal({
   const { t } = useTranslation();
   const account = useAccount(accountId);
   const { data: accounts = [] } = useAccounts();
+  const { data: { list: categories } = { list: [] } } = useCategories();
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
   const originalNotes = useNotes(`account-${accountId}`);
   const [accountNameError, setAccountNameError] = useState('');
   const [currentAccountName, setCurrentAccountName] = useState(
@@ -127,6 +134,9 @@ export function AccountMenuModal({
   if (!account) {
     return null;
   }
+  const accountCurrency = account.currency || defaultCurrencyCode || '';
+  const isForeignCurrency =
+    !!accountCurrency && accountCurrency !== defaultCurrencyCode;
 
   return (
     <Modal
@@ -173,6 +183,54 @@ export function AccountMenuModal({
             }}
           >
             <InlineField
+              label={t('Account currency')}
+              width="100%"
+              style={{ paddingBottom: 10 }}
+            >
+              <Select
+                value={accountCurrency}
+                onChange={value =>
+                  onSave?.({
+                    ...account,
+                    currency:
+                      !value || value === defaultCurrencyCode ? null : value,
+                  })
+                }
+                options={exchangeRateCurrencies.map(currency => [
+                  currency,
+                  currency === defaultCurrencyCode
+                    ? t('{{currency}} (budget currency)', { currency })
+                    : currency,
+                ])}
+                style={{ flex: 1 }}
+                disabled={!defaultCurrencyCode}
+              />
+            </InlineField>
+            {isForeignCurrency && !account.offbudget && (
+              <InlineField
+                label={t('Currency fluctuation category')}
+                width="100%"
+                style={{ paddingBottom: 10 }}
+              >
+                <Select
+                  value={account.revaluation_category || ''}
+                  onChange={value =>
+                    onSave?.({
+                      ...account,
+                      revaluation_category: value || null,
+                    })
+                  }
+                  options={[
+                    ['', t('Choose a category')],
+                    ...categories
+                      .filter(category => !category.is_income)
+                      .map(category => [category.id, category.name] as const),
+                  ]}
+                  style={{ flex: 1 }}
+                />
+              </InlineField>
+            )}
+            <InlineField
               label={t('Exchange rate source')}
               width="100%"
               style={{ paddingBottom: 10 }}
@@ -209,6 +267,38 @@ export function AccountMenuModal({
                 style={{ flex: 1 }}
               />
             </InlineField>
+            {isForeignCurrency && (
+              <Text
+                style={{
+                  ...styles.tnum,
+                  color: theme.pageTextSubdued,
+                  paddingBottom: account.currency_revaluation_date ? 4 : 10,
+                }}
+              >
+                {t('Native balance: {{amount}}', {
+                  amount: formatCurrencyAmount(
+                    account.currency_native_balance ?? 0,
+                    accountCurrency,
+                  ),
+                })}
+              </Text>
+            )}
+            {isForeignCurrency && account.currency_revaluation_date && (
+              <Text
+                style={{
+                  ...styles.tnum,
+                  color: theme.pageTextSubdued,
+                  paddingBottom: 10,
+                }}
+              >
+                {t('Current currency adjustment: {{amount}} · {{date}}', {
+                  amount: integerToCurrency(
+                    account.currency_revaluation_amount ?? 0,
+                  ),
+                  date: account.currency_revaluation_date,
+                })}
+              </Text>
+            )}
             <View
               style={{
                 overflowY: 'auto',

@@ -993,12 +993,12 @@ const Transaction = memo(function Transaction({
   const dispatch = useDispatch();
   const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
   const showTransactionCurrency = isTransactionCurrency(defaultCurrencyCode);
-  const conversionFeePercent =
-    accounts.find(account => account.id === originalTransaction.account)
-      ?.conversion_fee_percent ?? 0;
+  const transactionAccount = accounts.find(
+    account => account.id === originalTransaction.account,
+  );
+  const conversionFeePercent = transactionAccount?.conversion_fee_percent ?? 0;
   const exchangeRateProvider =
-    accounts.find(account => account.id === originalTransaction.account)
-      ?.exchange_rate_provider ?? 'frankfurter';
+    transactionAccount?.exchange_rate_provider ?? 'frankfurter';
   const dispatchSelected = useSelectedDispatch();
   const triggerRef = useRef(null);
 
@@ -1007,6 +1007,11 @@ const Transaction = memo(function Transaction({
   const [transaction, setTransaction] = useState(() =>
     serializeTransaction(originalTransaction, showZeroInDeposit),
   );
+  const displayedCurrency =
+    transaction.original_currency ||
+    transactionAccount?.currency ||
+    defaultCurrencyCode ||
+    '';
   const isPreview = isPreviewId(transaction.id);
 
   if (
@@ -1967,7 +1972,7 @@ const Transaction = memo(function Transaction({
             <Cell width={72} plain style={{ padding: 2, alignItems: 'center' }}>
               <Select
                 aria-label={t('Transaction currency')}
-                value={transaction.original_currency || defaultCurrencyCode}
+                value={displayedCurrency}
                 onChange={onCurrencyChange}
                 options={transactionCurrencyCodes.map(code => [
                   code,
@@ -2910,11 +2915,19 @@ export const TransactionTable = forwardRef(
     const { t } = useTranslation();
 
     const dispatch = useDispatch();
+    const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
     const [showHiddenCategories] = useLocalPref('budget.showHiddenCategories');
     const [newTransactions, setNewTransactions] = useState<TransactionEntity[]>(
       [],
     );
     const [prevIsAdding, setPrevIsAdding] = useState(false);
+    const currentAccountCurrency =
+      props.accounts?.find(account => account.id === props.currentAccountId)
+        ?.currency ?? null;
+    const originalCurrency =
+      currentAccountCurrency && currentAccountCurrency !== defaultCurrencyCode
+        ? currentAccountCurrency
+        : null;
     const splitsExpanded = useSplitsExpanded();
     const splitsExpandedDispatch = splitsExpanded.dispatch;
     const prevSplitsExpanded = useRef<SplitsExpandedContextValue | null>(null);
@@ -3099,6 +3112,8 @@ export const TransactionTable = forwardRef(
           makeTemporaryTransactions(
             props.currentAccountId,
             props.currentCategoryId,
+            undefined,
+            originalCurrency,
           ),
         );
       }
@@ -3130,6 +3145,7 @@ export const TransactionTable = forwardRef(
               props.currentAccountId,
               props.currentCategoryId,
               lastDate,
+              originalCurrency,
             ),
           );
           newNavigator.onEdit('temp', 'date');
@@ -3565,6 +3581,8 @@ export const TransactionTable = forwardRef(
         makeTemporaryTransactions(
           props.currentAccountId,
           props.currentCategoryId,
+          undefined,
+          originalCurrency,
         ),
       );
       props.onCloseAddTransaction();

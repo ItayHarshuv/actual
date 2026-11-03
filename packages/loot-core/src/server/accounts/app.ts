@@ -6,6 +6,7 @@ import { captureException } from '../../platform/exceptions';
 import * as asyncStorage from '../../platform/server/asyncStorage';
 import * as connection from '../../platform/server/connection';
 import { logger } from '../../platform/server/log';
+import { exchangeRateCurrencies } from '../../shared/currencies';
 import { isNonProductionEnvironment } from '../../shared/environment';
 import { dayFromDate } from '../../shared/months';
 import * as monthUtils from '../../shared/months';
@@ -28,7 +29,7 @@ import {
   PostError,
   TransactionError,
 } from '../errors';
-import { app as mainApp } from '../main-app';
+import { app as mainApp, send as sendMain } from '../main-app';
 import { mutator } from '../mutators';
 import { get, post } from '../post';
 import { getExchangeRate } from '../preferences/app';
@@ -38,6 +39,7 @@ import { undoable, withUndo } from '../undo';
 
 import * as link from './link';
 import { getStartingBalancePayee } from './payees';
+import { revalueForeignAccounts } from './revaluation';
 import * as bankSync from './sync';
 
 // Shared base type for link account parameters
@@ -53,6 +55,7 @@ export type AccountHandlers = {
   'accounts-get': typeof getAccounts;
   'account-balance': typeof getAccountBalance;
   'account-properties': typeof getAccountProperties;
+  'accounts-revalue': typeof revalueAccounts;
   'gocardless-accounts-link': typeof linkGoCardlessAccount;
   'simplefin-accounts-link': typeof linkSimpleFinAccount;
   'pluggyai-accounts-link': typeof linkPluggyAiAccount;
@@ -83,11 +86,17 @@ async function updateAccount({
   last_reconciled,
   conversion_fee_percent,
   exchange_rate_provider,
+  currency,
+  revaluation_category,
 }: Pick<AccountEntity, 'id' | 'name'> &
   Partial<
     Pick<
       AccountEntity,
-      'last_reconciled' | 'conversion_fee_percent' | 'exchange_rate_provider'
+      | 'last_reconciled'
+      | 'conversion_fee_percent'
+      | 'exchange_rate_provider'
+      | 'currency'
+      | 'revaluation_category'
     >
   >) {
   const existingAccount = await db.first<db.DbAccount>(
@@ -104,6 +113,23 @@ async function updateAccount({
       : exchange_rate_provider === 'frankfurter'
         ? 'frankfurter'
         : undefined;
+  const accountCurrency =
+    currency === undefined
+      ? undefined
+      : currency === null ||
+          exchangeRateCurrencies.some(candidate => candidate === currency)
+        ? currency
+        : null;
+  const hasCurrencyChange =
+    accountCurrency !== undefined &&
+    accountCurrency !== (existingAccount?.currency ?? null);
+  const hasProviderChange =
+    exchangeRateProvider !== undefined &&
+    exchangeRateProvider !==
+      (existingAccount?.exchange_rate_provider ?? 'frankfurter');
+  const hasRevaluationCategoryChange =
+    revaluation_category !== undefined &&
+    revaluation_category !== (existingAccount?.revaluation_category ?? null);
   await db.update('accounts', {
     id,
     name,
@@ -113,6 +139,13 @@ async function updateAccount({
     }),
     ...(exchangeRateProvider !== undefined && {
       exchange_rate_provider: exchangeRateProvider,
+    }),
+    ...(accountCurrency !== undefined && { currency: accountCurrency }),
+    ...(revaluation_category !== undefined && { revaluation_category }),
+    ...((hasCurrencyChange ||
+      hasProviderChange ||
+      hasRevaluationCategoryChange) && {
+      last_revaluation_check: null,
     }),
   });
 
@@ -202,37 +235,117 @@ async function updateAccount({
       }
     }
   }
+
+  if (hasCurrencyChange || hasProviderChange || hasRevaluationCategoryChange) {
+    try {
+      if (await revalueForeignAccounts({ accountId: id })) {
+        connection.send('sync-event', {
+          type: 'success',
+          tables: ['accounts', 'transactions'],
+        });
+      }
+    } catch (error) {
+      logger.warn('Unable to revalue foreign-currency account', {
+        accountId: id,
+        error,
+      });
+    }
+  }
   return {};
 }
 
 async function getAccounts(): Promise<AccountEntity[]> {
   const dbAccounts = await db.getAccounts();
-  return dbAccounts.map(
-    dbAccount =>
-      ({
-        id: dbAccount.id,
-        name: dbAccount.name,
-        offbudget: dbAccount.offbudget,
-        closed: dbAccount.closed,
-        sort_order: dbAccount.sort_order,
-        last_reconciled: dbAccount.last_reconciled ?? null,
-        tombstone: dbAccount.tombstone,
-        account_id: dbAccount.account_id ?? null,
-        bank: dbAccount.bank ?? null,
-        bankName: dbAccount.bankName ?? null,
-        bankId: dbAccount.bankId ?? null,
-        mask: dbAccount.mask ?? null,
-        official_name: dbAccount.official_name ?? null,
-        balance_current: dbAccount.balance_current ?? null,
-        balance_available: dbAccount.balance_available ?? null,
-        balance_limit: dbAccount.balance_limit ?? null,
-        account_sync_source: dbAccount.account_sync_source ?? null,
-        last_sync: dbAccount.last_sync ?? null,
-        conversion_fee_percent: dbAccount.conversion_fee_percent ?? 0,
-        exchange_rate_provider:
-          dbAccount.exchange_rate_provider ?? 'frankfurter',
-      }) satisfies AccountEntity,
+  const revaluations = await db.all<
+    Pick<
+      db.DbTransaction,
+      'acct' | 'amount' | 'exchange_rate' | 'exchange_rate_date'
+    >
+  >(
+    `SELECT acct, amount, exchange_rate, exchange_rate_date
+       FROM transactions
+      WHERE tombstone = 0 AND is_currency_revaluation = 1`,
   );
+  const revaluationsByAccount = new Map(
+    revaluations.map(revaluation => [revaluation.acct, revaluation]),
+  );
+  const nativeBalances = await db.all<{
+    id: db.DbAccount['id'];
+    balance: number | null;
+  }>(
+    `SELECT a.id,
+            SUM(
+              CASE
+                WHEN t.original_currency = a.currency
+                     AND t.original_amount IS NOT NULL
+                  THEN t.original_amount
+                WHEN t.original_currency IS NULL
+                     OR t.original_currency = a.currency
+                  THEN t.amount
+                ELSE 0
+              END
+            ) AS balance
+       FROM accounts a
+       LEFT JOIN transactions t
+         ON t.acct = a.id AND t.tombstone = 0 AND t.isParent = 0
+            AND t.is_currency_revaluation = 0
+      WHERE a.tombstone = 0 AND a.currency IS NOT NULL
+      GROUP BY a.id`,
+  );
+  const nativeBalancesByAccount = new Map(
+    nativeBalances.map(({ id, balance }) => [id, balance ?? 0]),
+  );
+  return dbAccounts.map(dbAccount => {
+    const revaluation = revaluationsByAccount.get(dbAccount.id);
+    return {
+      id: dbAccount.id,
+      name: dbAccount.name,
+      offbudget: dbAccount.offbudget,
+      closed: dbAccount.closed,
+      sort_order: dbAccount.sort_order,
+      last_reconciled: dbAccount.last_reconciled ?? null,
+      tombstone: dbAccount.tombstone,
+      account_id: dbAccount.account_id ?? null,
+      bank: dbAccount.bank ?? null,
+      bankName: dbAccount.bankName ?? null,
+      bankId: dbAccount.bankId ?? null,
+      mask: dbAccount.mask ?? null,
+      official_name: dbAccount.official_name ?? null,
+      balance_current: dbAccount.balance_current ?? null,
+      balance_available: dbAccount.balance_available ?? null,
+      balance_limit: dbAccount.balance_limit ?? null,
+      account_sync_source: dbAccount.account_sync_source ?? null,
+      last_sync: dbAccount.last_sync ?? null,
+      conversion_fee_percent: dbAccount.conversion_fee_percent ?? 0,
+      exchange_rate_provider: dbAccount.exchange_rate_provider ?? 'frankfurter',
+      currency: dbAccount.currency ?? null,
+      revaluation_category: dbAccount.revaluation_category ?? null,
+      last_revaluation_check: dbAccount.last_revaluation_check ?? null,
+      currency_revaluation_amount: revaluation?.amount ?? 0,
+      currency_revaluation_rate:
+        revaluation?.exchange_rate ?? dbAccount.last_revaluation_rate ?? null,
+      currency_revaluation_date:
+        revaluation?.exchange_rate_date ??
+        dbAccount.last_revaluation_rate_date ??
+        null,
+      currency_native_balance: nativeBalancesByAccount.get(dbAccount.id) ?? 0,
+    } satisfies AccountEntity;
+  });
+}
+
+async function revalueAccounts({
+  accountId,
+}: {
+  accountId?: AccountEntity['id'];
+} = {}) {
+  const didChange = await revalueForeignAccounts({ accountId });
+  if (didChange) {
+    connection.send('sync-event', {
+      type: 'success',
+      tables: ['accounts', 'transactions'],
+    });
+  }
+  return { didChange };
 }
 
 async function getAccountBalance({
@@ -481,16 +594,32 @@ async function createAccount({
   balance = 0,
   offBudget = false,
   closed = false,
+  currency,
+  revaluationCategory,
 }: {
   name: string;
   balance?: number | undefined;
   offBudget?: boolean | undefined;
   closed?: boolean | undefined;
+  currency?: string | null;
+  revaluationCategory?: CategoryEntity['id'] | null;
 }) {
+  const defaultCurrency = await db.first<Pick<db.DbPreference, 'value'>>(
+    `SELECT value FROM preferences WHERE id = 'defaultCurrencyCode'`,
+  );
+  const accountCurrency =
+    currency &&
+    currency !== defaultCurrency?.value &&
+    exchangeRateCurrencies.some(candidate => candidate === currency)
+      ? currency
+      : null;
   const id: AccountEntity['id'] = await db.insertAccount({
     name,
     offbudget: offBudget ? 1 : 0,
     closed: closed ? 1 : 0,
+    currency: accountCurrency,
+    revaluation_category:
+      accountCurrency && !offBudget ? revaluationCategory : null,
   });
 
   await db.insertPayee({
@@ -500,16 +629,59 @@ async function createAccount({
 
   if (balance != null && balance !== 0) {
     const payee = await getStartingBalancePayee();
+    const nativeAmount = amountToInteger(balance);
+    let convertedAmount = nativeAmount;
+    let exchangeRate: Awaited<ReturnType<typeof getExchangeRate>> | null = null;
+    if (accountCurrency && defaultCurrency?.value) {
+      try {
+        exchangeRate = await getExchangeRate({
+          source: accountCurrency,
+          target: defaultCurrency.value,
+        });
+        convertedAmount = Math.round(nativeAmount * exchangeRate.rate);
+        await db.update('accounts', {
+          id,
+          last_revaluation_check: monthUtils.currentDay(),
+          last_revaluation_base_currency: defaultCurrency.value,
+          last_revaluation_rate: String(exchangeRate.rate),
+          last_revaluation_rate_date: exchangeRate.date,
+        });
+      } catch (error) {
+        logger.warn('Unable to convert foreign starting balance', {
+          accountId: id,
+          error,
+        });
+      }
+    }
 
     await db.insertTransaction({
       account: id,
-      amount: amountToInteger(balance),
+      amount: convertedAmount,
       category: offBudget ? null : payee.category,
       payee: payee.id,
       date: monthUtils.currentDay(),
       cleared: true,
       starting_balance_flag: true,
+      ...(accountCurrency && {
+        original_amount: nativeAmount,
+        original_currency: accountCurrency,
+      }),
+      ...(exchangeRate && {
+        exchange_rate: String(exchangeRate.rate),
+        exchange_rate_date: exchangeRate.date,
+      }),
     });
+  }
+
+  if (accountCurrency) {
+    try {
+      await revalueForeignAccounts({ accountId: id });
+    } catch (error) {
+      logger.warn('Unable to revalue newly created account', {
+        accountId: id,
+        error,
+      });
+    }
   }
 
   return id;
@@ -1389,6 +1561,7 @@ app.method('account-update', mutator(undoable(updateAccount)));
 app.method('accounts-get', getAccounts);
 app.method('account-balance', getAccountBalance);
 app.method('account-properties', getAccountProperties);
+app.method('accounts-revalue', mutator(revalueAccounts));
 app.method('gocardless-accounts-link', linkGoCardlessAccount);
 app.method('simplefin-accounts-link', linkSimpleFinAccount);
 app.method('pluggyai-accounts-link', linkPluggyAiAccount);
@@ -1411,3 +1584,15 @@ app.method('accounts-bank-sync', accountsBankSync);
 app.method('simplefin-batch-sync', simpleFinBatchSync);
 app.method('transactions-import', mutator(undoable(importTransactions)));
 app.method('account-unlink', mutator(unlinkAccount));
+
+app.service(() => {
+  const runRevaluation = () => {
+    void sendMain('accounts-revalue', {}).catch(error => {
+      logger.warn('Unable to run scheduled currency revaluation', { error });
+    });
+  };
+
+  runRevaluation();
+  const interval = setInterval(runRevaluation, 60 * 60 * 1000);
+  return () => clearInterval(interval);
+});

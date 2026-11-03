@@ -1,3 +1,5 @@
+import * as connection from '../../platform/server/connection';
+import { logger } from '../../platform/server/log';
 import { q, Query } from '../../shared/query';
 import type { QueryState } from '../../shared/query';
 import type {
@@ -6,6 +8,7 @@ import type {
   PayeeEntity,
   TransactionEntity,
 } from '../../types/models';
+import { revalueForeignAccounts } from '../accounts/revaluation';
 import { createApp } from '../app';
 import { aqlQuery } from '../aql';
 import * as db from '../db';
@@ -47,6 +50,16 @@ async function handleBatchUpdateTransactions({
     learnCategories,
     runTransfers,
   });
+  try {
+    if (await revalueForeignAccounts()) {
+      connection.send('sync-event', {
+        type: 'success',
+        tables: ['accounts', 'transactions'],
+      });
+    }
+  } catch (error) {
+    logger.warn('Unable to update currency revaluation', { error });
+  }
 
   return result;
 }

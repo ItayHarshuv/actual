@@ -25,12 +25,14 @@ import { Popover } from '@actual-app/components/popover';
 import { Select } from '@actual-app/components/select';
 import { SpaceBetween } from '@actual-app/components/space-between';
 import { styles } from '@actual-app/components/styles';
+import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { Tooltip } from '@actual-app/components/tooltip';
 import { View } from '@actual-app/components/view';
 import { format as formatDate } from 'date-fns';
 
-import { tsToRelativeTime } from 'loot-core/shared/util';
+import { exchangeRateCurrencies } from 'loot-core/shared/currencies';
+import { integerToCurrency, tsToRelativeTime } from 'loot-core/shared/util';
 import type {
   AccountEntity,
   RuleConditionEntity,
@@ -50,6 +52,8 @@ import { FiltersStack } from '@desktop-client/components/filters/FiltersStack';
 import type { SavedFilter } from '@desktop-client/components/filters/SavedFilterMenuButton';
 import { NotesButton } from '@desktop-client/components/NotesButton';
 import { SelectedTransactionsButton } from '@desktop-client/components/transactions/SelectedTransactionsButton';
+import { formatCurrencyAmount } from '@desktop-client/currency/transactionCurrency';
+import { useCategories } from '@desktop-client/hooks/useCategories';
 import { useDateFormat } from '@desktop-client/hooks/useDateFormat';
 import { useLocale } from '@desktop-client/hooks/useLocale';
 import { useLocalPref } from '@desktop-client/hooks/useLocalPref';
@@ -101,6 +105,8 @@ type AccountHeaderProps = {
   onSaveExchangeRateProvider: (
     provider: NonNullable<AccountEntity['exchange_rate_provider']>,
   ) => void;
+  onSaveAccountCurrency: (currency: string | null) => void;
+  onSaveRevaluationCategory: (category: string | null) => void;
   saveNameError: AccountNameFieldProps['saveNameError'];
   onSync: () => void;
   onImport: () => void;
@@ -173,6 +179,8 @@ export function AccountHeader({
   onSaveName,
   onSaveConversionFee,
   onSaveExchangeRateProvider,
+  onSaveAccountCurrency,
+  onSaveRevaluationCategory,
   saveNameError,
   onSync,
   onImport,
@@ -210,7 +218,11 @@ export function AccountHeader({
   const [showNetWorthChartPref, _setShowNetWorthChartPref] = useSyncedPref(
     `show-account-${accountId}-net-worth-chart`,
   );
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
   const showNetWorthChart = showNetWorthChartPref === 'true';
+  const accountCurrency = account?.currency || defaultCurrencyCode || '';
+  const isForeignCurrency =
+    !!accountCurrency && accountCurrency !== defaultCurrencyCode;
 
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
   const locale = useLocale();
@@ -328,6 +340,22 @@ export function AccountHeader({
               isFiltered={isFiltered}
               filteredAmount={filteredAmount}
             />
+            {account && isForeignCurrency && (
+              <Text
+                style={{
+                  ...styles.tnum,
+                  color: theme.pageTextSubdued,
+                  marginTop: 2,
+                }}
+              >
+                {t('{{amount}} in account currency', {
+                  amount: formatCurrencyAmount(
+                    account.currency_native_balance ?? 0,
+                    accountCurrency,
+                  ),
+                })}
+              </Text>
+            )}
           </View>
 
           <BalanceHistoryGraph
@@ -523,6 +551,8 @@ export function AccountHeader({
                       showReconciled={showReconciled}
                       onSaveConversionFee={onSaveConversionFee}
                       onSaveExchangeRateProvider={onSaveExchangeRateProvider}
+                      onSaveAccountCurrency={onSaveAccountCurrency}
+                      onSaveRevaluationCategory={onSaveRevaluationCategory}
                       onMenuSelect={onMenuSelect}
                     />
                   </Dialog>
@@ -751,6 +781,8 @@ type AccountMenuProps = {
   onSaveExchangeRateProvider: (
     provider: NonNullable<AccountEntity['exchange_rate_provider']>,
   ) => void;
+  onSaveAccountCurrency: (currency: string | null) => void;
+  onSaveRevaluationCategory: (category: string | null) => void;
   onMenuSelect: (
     item:
       | 'link'
@@ -777,16 +809,64 @@ function AccountMenu({
   isSorted,
   onSaveConversionFee,
   onSaveExchangeRateProvider,
+  onSaveAccountCurrency,
+  onSaveRevaluationCategory,
   onMenuSelect,
 }: AccountMenuProps) {
   const { t } = useTranslation();
   const syncServerStatus = useSyncServerStatus();
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
+  const { data: { list: categories } = { list: [] } } = useCategories();
   const [conversionFeePercent, setConversionFeePercent] = useState(
     String(account.conversion_fee_percent ?? 0),
   );
+  const accountCurrency = account.currency || defaultCurrencyCode || '';
+  const isForeignCurrency =
+    !!accountCurrency && accountCurrency !== defaultCurrencyCode;
 
   return (
     <View>
+      <InlineField
+        label={t('Account currency')}
+        width="100%"
+        style={{ padding: 10, paddingBottom: 0 }}
+      >
+        <Select
+          value={accountCurrency}
+          onChange={value =>
+            onSaveAccountCurrency(
+              !value || value === defaultCurrencyCode ? null : value,
+            )
+          }
+          options={exchangeRateCurrencies.map(currency => [
+            currency,
+            currency === defaultCurrencyCode
+              ? t('{{currency}} (budget currency)', { currency })
+              : currency,
+          ])}
+          style={{ flex: 1 }}
+          disabled={!defaultCurrencyCode}
+        />
+      </InlineField>
+      {isForeignCurrency && !account.offbudget && (
+        <InlineField
+          label={t('Currency fluctuation category')}
+          width="100%"
+          style={{ padding: 10, paddingBottom: 0 }}
+        >
+          <Select
+            value={account.revaluation_category || ''}
+            onChange={value => onSaveRevaluationCategory(value || null)}
+            options={[
+              ['', t('Choose a category')],
+              ...categories
+                .filter(category => !category.is_income)
+                .map(category => [category.id, category.name] as const),
+            ]}
+            style={{ flex: 1 }}
+          />
+        </InlineField>
+      )}
       <InlineField
         label={t('Exchange rate source')}
         width="100%"
@@ -831,6 +911,38 @@ function AccountMenu({
           style={{ flex: 1 }}
         />
       </InlineField>
+      {isForeignCurrency && (
+        <Text
+          style={{
+            ...styles.tnum,
+            color: theme.pageTextSubdued,
+            padding: account.currency_revaluation_date
+              ? '0 10px 4px'
+              : '0 10px 10px',
+          }}
+        >
+          {t('Native balance: {{amount}}', {
+            amount: formatCurrencyAmount(
+              account.currency_native_balance ?? 0,
+              accountCurrency,
+            ),
+          })}
+        </Text>
+      )}
+      {isForeignCurrency && account.currency_revaluation_date && (
+        <Text
+          style={{
+            ...styles.tnum,
+            color: theme.pageTextSubdued,
+            padding: '0 10px 10px',
+          }}
+        >
+          {t('Current currency adjustment: {{amount}} · {{date}}', {
+            amount: integerToCurrency(account.currency_revaluation_amount ?? 0),
+            date: account.currency_revaluation_date,
+          })}
+        </Text>
+      )}
       <Menu
         slot="close"
         onMenuSelect={item => {

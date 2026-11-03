@@ -58,6 +58,8 @@ type CreateAccountPayload = {
   name: string;
   balance: number;
   offBudget: boolean;
+  currency?: string | null;
+  revaluationCategory?: CategoryEntity['id'] | null;
 };
 
 export function useCreateAccountMutation() {
@@ -66,11 +68,19 @@ export function useCreateAccountMutation() {
   const { t } = useTranslation();
 
   return useMutation({
-    mutationFn: async ({ name, balance, offBudget }: CreateAccountPayload) => {
+    mutationFn: async ({
+      name,
+      balance,
+      offBudget,
+      currency,
+      revaluationCategory,
+    }: CreateAccountPayload) => {
       const id = await send('account-create', {
         name,
         balance,
         offBudget,
+        currency,
+        revaluationCategory,
       });
       return id;
     },

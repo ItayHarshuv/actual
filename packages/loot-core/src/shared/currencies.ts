@@ -9,6 +9,8 @@ export type Currency = {
   symbolFirst: boolean;
 };
 
+export const exchangeRateCurrencies = ['ILS', 'USD', 'EUR'] as const;
+
 // When adding a new currency with a higher decimal precision, make sure to update
 // the MAX_SAFE_NUMBER in util.ts.
 // When adding a currency, also update the translation map in

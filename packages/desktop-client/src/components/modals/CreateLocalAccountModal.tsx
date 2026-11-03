@@ -9,10 +9,12 @@ import { FormError } from '@actual-app/components/form-error';
 import { InitialFocus } from '@actual-app/components/initial-focus';
 import { InlineField } from '@actual-app/components/inline-field';
 import { Input } from '@actual-app/components/input';
+import { Select } from '@actual-app/components/select';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
+import { exchangeRateCurrencies } from 'loot-core/shared/currencies';
 import { toRelaxedNumber } from 'loot-core/shared/util';
 
 import { useCreateAccountMutation } from '@desktop-client/accounts';
@@ -27,7 +29,9 @@ import {
 import { Checkbox } from '@desktop-client/components/forms';
 import { validateAccountName } from '@desktop-client/components/util/accountValidation';
 import { useAccounts } from '@desktop-client/hooks/useAccounts';
+import { useCategories } from '@desktop-client/hooks/useCategories';
 import { useNavigate } from '@desktop-client/hooks/useNavigate';
+import { useSyncedPref } from '@desktop-client/hooks/useSyncedPref';
 import { closeModal } from '@desktop-client/modals/modalsSlice';
 import { useDispatch } from '@desktop-client/redux';
 
@@ -36,12 +40,25 @@ export function CreateLocalAccountModal() {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { data: accounts = [] } = useAccounts();
+  const { data: { list: categories } = { list: [] } } = useCategories();
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
   const [name, setName] = useState('');
   const [offbudget, setOffbudget] = useState(false);
   const [balance, setBalance] = useState('0');
+  const [currency, setCurrency] = useState('');
+  const [revaluationCategory, setRevaluationCategory] = useState('');
 
   const [nameError, setNameError] = useState(null);
   const [balanceError, setBalanceError] = useState(false);
+  const [categoryError, setCategoryError] = useState(false);
+  const selectedCurrency = currency || defaultCurrencyCode || '';
+  const isSupportedBaseCurrency = exchangeRateCurrencies.some(
+    candidate => candidate === defaultCurrencyCode,
+  );
+  const isForeignCurrency =
+    isSupportedBaseCurrency &&
+    selectedCurrency !== '' &&
+    selectedCurrency !== defaultCurrencyCode;
 
   const validateBalance = balance => !isNaN(parseFloat(balance));
 
@@ -64,13 +81,19 @@ export function CreateLocalAccountModal() {
 
     const balanceError = !validateBalance(balance);
     setBalanceError(balanceError);
+    const categoryError =
+      isForeignCurrency && !offbudget && !revaluationCategory;
+    setCategoryError(categoryError);
 
-    if (!nameError && !balanceError) {
+    if (!nameError && !balanceError && !categoryError) {
       createAccount.mutate(
         {
           name,
           balance: toRelaxedNumber(balance),
           offBudget: offbudget,
+          currency: isForeignCurrency ? selectedCurrency : null,
+          revaluationCategory:
+            isForeignCurrency && !offbudget ? revaluationCategory : null,
         },
         {
           onSuccess: id => {
@@ -112,6 +135,32 @@ export function CreateLocalAccountModal() {
                   {nameError}
                 </FormError>
               )}
+
+              <InlineField label={t('Account currency')} width="100%">
+                <Select
+                  value={selectedCurrency}
+                  onChange={setCurrency}
+                  options={
+                    isSupportedBaseCurrency
+                      ? exchangeRateCurrencies.map(code => [
+                          code,
+                          code === defaultCurrencyCode
+                            ? t('{{currency}} (budget currency)', {
+                                currency: code,
+                              })
+                            : code,
+                        ])
+                      : [
+                          [
+                            defaultCurrencyCode || '',
+                            defaultCurrencyCode || t('Budget currency'),
+                          ],
+                        ]
+                  }
+                  disabled={!isSupportedBaseCurrency}
+                  style={{ flex: 1 }}
+                />
+              </InlineField>
 
               <View
                 style={{
@@ -168,7 +217,43 @@ export function CreateLocalAccountModal() {
                 </View>
               </View>
 
-              <InlineField label={t('Balance')} width="100%">
+              {isForeignCurrency && !offbudget && (
+                <>
+                  <InlineField
+                    label={t('Currency fluctuation category')}
+                    width="100%"
+                  >
+                    <Select
+                      value={revaluationCategory}
+                      onChange={value => {
+                        setRevaluationCategory(value);
+                        setCategoryError(false);
+                      }}
+                      options={[
+                        ['', t('Choose a category')],
+                        ...categories
+                          .filter(category => !category.is_income)
+                          .map(
+                            category => [category.id, category.name] as const,
+                          ),
+                      ]}
+                      style={{ flex: 1 }}
+                    />
+                  </InlineField>
+                  {categoryError && (
+                    <FormError style={{ marginLeft: 75 }}>
+                      <Trans>Choose a category for currency fluctuations</Trans>
+                    </FormError>
+                  )}
+                </>
+              )}
+
+              <InlineField
+                label={t('Balance ({{currency}})', {
+                  currency: selectedCurrency,
+                })}
+                width="100%"
+              >
                 <Input
                   name="balance"
                   inputMode="decimal"

@@ -1,6 +1,7 @@
 import * as asyncStorage from '../../platform/server/asyncStorage';
 import { fetch } from '../../platform/server/fetch';
 import * as fs from '../../platform/server/fs';
+import { exchangeRateCurrencies } from '../../shared/currencies';
 import { currentDay } from '../../shared/months';
 import { stringToInteger } from '../../shared/util';
 import type {
@@ -83,7 +84,7 @@ type ExchangeRate = {
 
 export type ExchangeRateProvider = 'frankfurter' | 'bank-of-israel';
 
-const supportedCurrencies = new Set(['EUR', 'ILS', 'USD']);
+const supportedCurrencies = new Set<string>(exchangeRateCurrencies);
 
 export async function getExchangeRate({
   source,

@@ -26,6 +26,12 @@ export type DbAccount = {
   last_sync?: string | null;
   conversion_fee_percent: number;
   exchange_rate_provider: 'frankfurter' | 'bank-of-israel';
+  currency?: string | null;
+  revaluation_category?: DbCategory['id'] | null;
+  last_revaluation_check?: string | null;
+  last_revaluation_base_currency?: string | null;
+  last_revaluation_rate?: string | null;
+  last_revaluation_rate_date?: string | null;
 };
 
 export type DbBank = {
@@ -162,6 +168,7 @@ export type DbTransaction = {
   original_currency?: string | null;
   exchange_rate?: string | null;
   exchange_rate_date?: string | null;
+  is_currency_revaluation: 0 | 1;
   sort_order: number;
   parent_id?: DbTransaction['id'] | null;
   category?: DbCategory['id'] | null;
@@ -275,6 +282,7 @@ export type DbViewTransactionInternal = {
   original_currency: DbTransaction['original_currency'] | null;
   exchange_rate: DbTransaction['exchange_rate'] | null;
   exchange_rate_date: DbTransaction['exchange_rate_date'] | null;
+  is_currency_revaluation: boolean;
   parent_id: DbTransaction['parent_id'] | null;
   category: DbCategory['id'] | null;
   payee: DbPayee['id'] | null;

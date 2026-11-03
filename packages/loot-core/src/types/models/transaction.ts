@@ -17,6 +17,7 @@ export type TransactionEntity = {
   original_currency?: string | null;
   exchange_rate?: string | null;
   exchange_rate_date?: string | null;
+  is_currency_revaluation?: boolean;
   payee?: PayeeEntity['id'] | null;
   notes?: string;
   date: string;
