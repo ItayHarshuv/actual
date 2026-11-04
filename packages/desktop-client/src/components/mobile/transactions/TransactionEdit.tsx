@@ -51,6 +51,7 @@ import {
 import {
   amountToInteger,
   applyFindReplace,
+  currencyToAmount,
   diffItems,
   getChangedValues,
   groupById,
@@ -632,6 +633,11 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
       transaction.original_currency ||
       transactionAccount?.currency ||
       defaultCurrencyCode;
+    const totalAmountDraftRef = useRef(transaction.amount);
+
+    useEffect(() => {
+      totalAmountDraftRef.current = transaction.amount;
+    }, [transaction.amount]);
 
     const { editingField, onRequestActiveEdit, onClearActiveEdit } =
       useSingleActiveEditForm()!;
@@ -836,11 +842,21 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
 
     const onTotalAmountUpdate = useCallback(
       (value: number) => {
+        totalAmountDraftRef.current = value;
         if (transaction.amount !== value) {
           void onUpdateInner(transaction, 'amount', value);
         }
       },
       [onUpdateInner, transaction],
+    );
+
+    const onTotalAmountChange = useCallback(
+      (value: string) => {
+        const amount = currencyToAmount(value) ?? 0;
+        totalAmountDraftRef.current =
+          transaction.amount > 0 ? Math.abs(amount) : -Math.abs(amount);
+      },
+      [transaction.amount],
     );
 
     const onEditFieldInner = useCallback(
@@ -1099,6 +1115,7 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
               focused={totalAmountFocused}
               onFocus={onTotalAmountEdit}
               onBlur={() => onClearActiveEdit()}
+              onChangeValue={onTotalAmountChange}
               onUpdateAmount={onTotalAmountUpdate}
               focusedStyle={{
                 width: 'auto',
@@ -1116,7 +1133,10 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
                   value={displayedCurrency}
                   onChange={currencyCode =>
                     void onUpdateInner(
-                      transaction,
+                      {
+                        ...transaction,
+                        amount: totalAmountDraftRef.current,
+                      },
                       'original_currency',
                       currencyCode === defaultCurrencyCode
                         ? null
@@ -1448,8 +1468,14 @@ function TransactionEditUnconnected({
   const [fetchedTransactions, setFetchedTransactions] = useState<
     TransactionEntity[]
   >([]);
+  const transactionsRef = useRef(transactions);
+  const updateQueueRef = useRef(Promise.resolve());
   const isAdding = useRef(false);
   const isDeleted = useRef(false);
+
+  useEffect(() => {
+    transactionsRef.current = transactions;
+  }, [transactions]);
 
   const searchParamCategory = useMemo(
     () => categories.find(c => c.name === searchParams.get('category'))?.id,
@@ -1560,62 +1586,36 @@ function TransactionEditUnconnected({
   ]);
 
   const onUpdate = useCallback(
-    async (
+    (
       serializedTransaction: TransactionEntity,
       updatedField: keyof TransactionEntity,
     ) => {
-      let transaction = deserializeTransaction(
-        serializedTransaction,
-        null,
-        dateFormat,
-      );
-      const transactionAccount = accounts.find(
-        account => account.id === transaction.account,
-      );
-      const conversionFeePercent =
-        transactionAccount?.conversion_fee_percent ?? 0;
-      const exchangeRateProvider =
-        transactionAccount?.exchange_rate_provider ?? 'frankfurter';
+      const update = async () => {
+        const currentTransaction = transactionsRef.current.find(
+          item => item.id === serializedTransaction.id,
+        );
+        const currentSerializedTransaction = currentTransaction
+          ? serializeTransaction(currentTransaction, dateFormat)
+          : serializedTransaction;
+        let transaction = deserializeTransaction(
+          {
+            ...currentSerializedTransaction,
+            [updatedField]: serializedTransaction[updatedField],
+          },
+          currentTransaction ?? null,
+          dateFormat,
+        );
+        const transactionAccount = accounts.find(
+          account => account.id === transaction.account,
+        );
+        const conversionFeePercent =
+          transactionAccount?.conversion_fee_percent ?? 0;
+        const exchangeRateProvider =
+          transactionAccount?.exchange_rate_provider ?? 'frankfurter';
 
-      if (isTransactionCurrency(defaultCurrencyCode)) {
-        try {
-          if (updatedField === 'amount' && transaction.original_currency) {
-            transaction = await setTransactionCurrencyAmount(
-              transaction,
-              transaction.amount,
-              transaction.original_currency,
-              defaultCurrencyCode,
-              conversionFeePercent,
-              exchangeRateProvider,
-            );
-          } else if (
-            updatedField === 'account' &&
-            transaction.original_currency &&
-            transaction.original_amount != null
-          ) {
-            transaction = await setTransactionCurrencyAmount(
-              transaction,
-              transaction.original_amount,
-              transaction.original_currency,
-              defaultCurrencyCode,
-              conversionFeePercent,
-              exchangeRateProvider,
-            );
-          } else if (
-            updatedField === 'date' &&
-            transaction.original_currency &&
-            transaction.original_amount != null
-          ) {
-            transaction = await setTransactionCurrencyAmount(
-              transaction,
-              transaction.original_amount,
-              transaction.original_currency,
-              defaultCurrencyCode,
-              conversionFeePercent,
-              exchangeRateProvider,
-            );
-          } else if (updatedField === 'original_currency') {
-            if (transaction.original_currency) {
+        if (isTransactionCurrency(defaultCurrencyCode)) {
+          try {
+            if (updatedField === 'amount' && transaction.original_currency) {
               transaction = await setTransactionCurrencyAmount(
                 transaction,
                 transaction.amount,
@@ -1624,115 +1624,151 @@ function TransactionEditUnconnected({
                 conversionFeePercent,
                 exchangeRateProvider,
               );
-            } else {
-              const existingTransaction = transactions.find(
-                item => item.id === transaction.id,
-              );
-              transaction = clearTransactionCurrency({
-                ...transaction,
-                amount: existingTransaction?.amount ?? transaction.amount,
-              });
-            }
-          }
-        } catch {
-          dispatch(
-            addNotification({
-              notification: {
-                type: 'error',
-                message: t(
-                  'Could not load an exchange rate. Connect to the internet once to cache a rate.',
-                ),
-              },
-            }),
-          );
-          return;
-        }
-      }
-
-      // Run the rules to auto-fill in any data. Right now we only do
-      // this on new transactions because that's how desktop works.
-      const newTransaction = { ...transaction };
-      if (isTemporary(newTransaction)) {
-        const afterRules = await send('rules-run', {
-          transaction: newTransaction,
-        });
-        const diff = getChangedValues(newTransaction, afterRules);
-
-        if (diff) {
-          Object.keys(diff).forEach(key => {
-            const field = key as keyof TransactionEntity;
-            // Update "empty" fields in general
-            // Or update all fields if the payee changes (assists location-based entry by
-            // applying rules to prefill category, notes, etc. based on the selected payee)
-            if (
-              newTransaction[field] == null ||
-              newTransaction[field] === '' ||
-              newTransaction[field] === 0 ||
-              newTransaction[field] === false ||
-              updatedField === 'payee'
+            } else if (
+              updatedField === 'account' &&
+              transaction.original_currency &&
+              transaction.original_amount != null
             ) {
-              (newTransaction as Record<string, unknown>)[field] = diff[field];
+              transaction = await setTransactionCurrencyAmount(
+                transaction,
+                transaction.original_amount,
+                transaction.original_currency,
+                defaultCurrencyCode,
+                conversionFeePercent,
+                exchangeRateProvider,
+              );
+            } else if (
+              updatedField === 'date' &&
+              transaction.original_currency &&
+              transaction.original_amount != null
+            ) {
+              transaction = await setTransactionCurrencyAmount(
+                transaction,
+                transaction.original_amount,
+                transaction.original_currency,
+                defaultCurrencyCode,
+                conversionFeePercent,
+                exchangeRateProvider,
+              );
+            } else if (updatedField === 'original_currency') {
+              if (transaction.original_currency) {
+                transaction = await setTransactionCurrencyAmount(
+                  transaction,
+                  transaction.amount,
+                  transaction.original_currency,
+                  defaultCurrencyCode,
+                  conversionFeePercent,
+                  exchangeRateProvider,
+                );
+              } else {
+                const existingTransaction = transactionsRef.current.find(
+                  item => item.id === transaction.id,
+                );
+                transaction = clearTransactionCurrency({
+                  ...transaction,
+                  amount: existingTransaction?.amount ?? transaction.amount,
+                });
+              }
             }
-          });
-
-          // When a rule updates a parent transaction, overwrite all changes to the current field in subtransactions.
-          if (
-            newTransaction.is_parent &&
-            diff.subtransactions !== undefined &&
-            updatedField !== null
-          ) {
-            newTransaction.subtransactions = diff.subtransactions.map(
-              (st, idx) => ({
-                ...(newTransaction.subtransactions?.[idx] || st),
-                ...(st[updatedField] != null && {
-                  [updatedField]: st[updatedField],
-                }),
+          } catch {
+            dispatch(
+              addNotification({
+                notification: {
+                  type: 'error',
+                  message: t(
+                    'Could not load an exchange rate. Connect to the internet once to cache a rate.',
+                  ),
+                },
               }),
             );
+            return;
           }
         }
-      }
 
-      const { data: newTransactions } = updateTransaction(
-        transactions,
-        newTransaction,
-      );
-      setTransactions(newTransactions);
+        // Run the rules to auto-fill in any data. Right now we only do
+        // this on new transactions because that's how desktop works.
+        const newTransaction = { ...transaction };
+        if (isTemporary(newTransaction)) {
+          const afterRules = await send('rules-run', {
+            transaction: newTransaction,
+          });
+          const diff = getChangedValues(newTransaction, afterRules);
 
-      if (updatedField === 'payee') {
-        setShouldShowSaveLocation(false);
+          if (diff) {
+            Object.keys(diff).forEach(key => {
+              const field = key as keyof TransactionEntity;
+              // Update "empty" fields in general
+              // Or update all fields if the payee changes (assists location-based entry by
+              // applying rules to prefill category, notes, etc. based on the selected payee)
+              if (
+                newTransaction[field] == null ||
+                newTransaction[field] === '' ||
+                newTransaction[field] === 0 ||
+                newTransaction[field] === false ||
+                updatedField === 'payee'
+              ) {
+                (newTransaction as Record<string, unknown>)[field] =
+                  diff[field];
+              }
+            });
 
-        if (newTransaction.payee && locationAccess) {
-          const payeeLocations = await locationService.getPayeeLocations(
-            newTransaction.payee,
-          );
-          if (payeeLocations.length === 0) {
-            setShouldShowSaveLocation(true);
-          } else {
-            const currentPosition = await locationService.getCurrentPosition();
-            const hasNearby = payeeLocations.some(
-              loc =>
-                calculateDistance(currentPosition, {
-                  latitude: loc.latitude,
-                  longitude: loc.longitude,
-                }) <= DEFAULT_MAX_DISTANCE_METERS,
-            );
-            if (!hasNearby) {
-              setShouldShowSaveLocation(true);
+            // When a rule updates a parent transaction, overwrite all changes to the current field in subtransactions.
+            if (
+              newTransaction.is_parent &&
+              diff.subtransactions !== undefined &&
+              updatedField !== null
+            ) {
+              newTransaction.subtransactions = diff.subtransactions.map(
+                (st, idx) => ({
+                  ...(newTransaction.subtransactions?.[idx] || st),
+                  ...(st[updatedField] != null && {
+                    [updatedField]: st[updatedField],
+                  }),
+                }),
+              );
             }
           }
         }
-      }
+
+        const { data: newTransactions } = updateTransaction(
+          transactionsRef.current,
+          newTransaction,
+        );
+        transactionsRef.current = newTransactions;
+        setTransactions(newTransactions);
+
+        if (updatedField === 'payee') {
+          setShouldShowSaveLocation(false);
+
+          if (newTransaction.payee && locationAccess) {
+            const payeeLocations = await locationService.getPayeeLocations(
+              newTransaction.payee,
+            );
+            if (payeeLocations.length === 0) {
+              setShouldShowSaveLocation(true);
+            } else {
+              const currentPosition =
+                await locationService.getCurrentPosition();
+              const hasNearby = payeeLocations.some(
+                loc =>
+                  calculateDistance(currentPosition, {
+                    latitude: loc.latitude,
+                    longitude: loc.longitude,
+                  }) <= DEFAULT_MAX_DISTANCE_METERS,
+              );
+              if (!hasNearby) {
+                setShouldShowSaveLocation(true);
+              }
+            }
+          }
+        }
+      };
+
+      const queuedUpdate = updateQueueRef.current.then(update);
+      updateQueueRef.current = queuedUpdate.catch(() => undefined);
+      return queuedUpdate;
     },
-    [
-      dateFormat,
-      defaultCurrencyCode,
-      accounts,
-      dispatch,
-      locationAccess,
-      t,
-      transactions,
-    ],
+    [dateFormat, defaultCurrencyCode, accounts, dispatch, locationAccess, t],
   );
 
   const onSave = useCallback(
