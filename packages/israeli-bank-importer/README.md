@@ -61,10 +61,17 @@ The value of `ISRAELI_BANK_IMPORTER_CONFIG` is JSON:
       ]
     }
   ],
+  "importFromDate": "2026-11-05",
   "pendingGraceDays": 7,
   "dryRun": true
 }
 ```
+
+`importFromDate` is optional. Set it to the first date you want imported, as
+`YYYY-MM-DD`. The worker asks the bank for transactions from that date and
+skips anything older, including on later redeploys. Omit it to keep the default
+window of about two years. Changing this value does not delete transactions
+already stored in Actual.
 
 `sourceAccountNumbers` contains Hapoalim account identifiers or CAL card last
 four digits returned by the scraper. Use `"all"` for an initial dry run; the
@@ -89,6 +96,8 @@ contains its downloaded Actual data, Chromium profile, and pending state.
 ## Transaction behavior
 
 - Completed transactions are cleared and deduplicated with stable import IDs.
+- Transactions dated before `importFromDate` are ignored. Completed transactions
+  already in Actual remain until you delete them.
 - Pending Hapoalim and CAL transactions are uncleared.
 - When settlement can be matched, the pending row is updated in place.
 - A pending row absent from the source for seven days is removed unless it was

@@ -11,6 +11,10 @@ import type {
 
 import { mapCurrency } from './currency.js';
 import {
+  toScrapeStartDate,
+  transactionsOnOrAfter,
+} from './import-from-date.js';
+import {
   completedImportedId,
   findPendingMatch,
   isPastGracePeriod,
@@ -272,9 +276,15 @@ async function scrapeBank(
   seenPending: Set<string>,
   retrieveOtpCode: OtpCodeRetriever,
 ): Promise<void> {
+  const startDate = toScrapeStartDate(config.importFromDate);
+  log('scrape_started', {
+    companyId: bank.companyId,
+    startDate: startDate.toISOString(),
+    importFromDate: config.importFromDate ?? null,
+  });
   const scraper = createScraper({
     companyId: bank.companyId,
-    startDate: new Date(Date.now() - 2 * 365 * 86_400_000),
+    startDate,
     timeout: 15 * 60_000,
     additionalTransactionInformation: true,
     args: [
@@ -326,9 +336,25 @@ async function scrapeBank(
     }
     const exchangeRateProvider =
       actualAccount.exchange_rate_provider ?? 'bank-of-israel';
+    const sourceTransactions = sourceAccount.txns as SourceTransaction[];
+    const datedTransactions = transactionsOnOrAfter(
+      sourceTransactions,
+      config.importFromDate,
+    );
+    if (
+      config.importFromDate &&
+      datedTransactions.length !== sourceTransactions.length
+    ) {
+      log('transactions_before_import_from_date', {
+        companyId: bank.companyId,
+        sourceAccountNumber,
+        importFromDate: config.importFromDate,
+        skipped: sourceTransactions.length - datedTransactions.length,
+      });
+    }
     const transactions = selectTransactionsForImport(
       bank.companyId,
-      sourceAccount.txns as SourceTransaction[],
+      datedTransactions,
     );
     const contexts = transactions.map(transaction => ({
       companyId: bank.companyId,

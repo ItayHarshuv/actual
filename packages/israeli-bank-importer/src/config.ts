@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { CompanyTypes } from '@tomerh2001/israeli-bank-scrapers';
 
+import { parseImportFromDate } from './import-from-date.js';
 import type {
   HapoalimConfig,
   ImporterConfig,
@@ -160,6 +161,7 @@ export function loadConfig(
         : env.TZ || 'Asia/Jerusalem',
     storageDir: path.resolve(storageDir),
     pendingGraceDays,
+    importFromDate: parseImportFromDate(parsed.importFromDate),
     dryRun: parsed.dryRun === true || env.DRY_RUN === 'true',
   };
 }

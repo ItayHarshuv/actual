@@ -38,6 +38,7 @@ export type ImporterConfig = {
   timezone: string;
   storageDir: string;
   pendingGraceDays: number;
+  importFromDate?: string;
   dryRun: boolean;
 };
 
