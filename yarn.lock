@@ -9327,7 +9327,7 @@ __metadata:
 
 "@tomerh2001/israeli-bank-scrapers@patch:@tomerh2001/israeli-bank-scrapers@npm%3A6.4.0#~/.yarn/patches/@tomerh2001-israeli-bank-scrapers-npm-6.4.0-39fcdda198.patch":
   version: 6.4.0
-  resolution: "@tomerh2001/israeli-bank-scrapers@patch:@tomerh2001/israeli-bank-scrapers@npm%3A6.4.0#~/.yarn/patches/@tomerh2001-israeli-bank-scrapers-npm-6.4.0-39fcdda198.patch::version=6.4.0&hash=2d2392"
+  resolution: "@tomerh2001/israeli-bank-scrapers@patch:@tomerh2001/israeli-bank-scrapers@npm%3A6.4.0#~/.yarn/patches/@tomerh2001-israeli-bank-scrapers-npm-6.4.0-39fcdda198.patch::version=6.4.0&hash=627009"
   dependencies:
     core-js: "npm:^3.1.4"
     debug: "npm:^4.3.2"
@@ -9338,7 +9338,7 @@ __metadata:
     puppeteer: "npm:22.15.0"
     utility-types: "npm:^3.11.0"
     uuid: "npm:^9.0.1"
-  checksum: 10/39d4d9b82bd7f370abd51f26d5d2a9132c1cd0607df25cdc08793bb07ac7f82e409c6e72669caebdf96ea1720f5bba0f2f8fab71b5cfba6ad912896d68cc1095
+  checksum: 10/772288afc0158ab4e7f64f63cea789c5cec69947c3b6971b8b609101be727b16460319024bb18c5415a6d04a78ea83c5a21b91ea2405b627a44e44d396a8e2d3
   languageName: node
   linkType: hard
 

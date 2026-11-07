@@ -94,6 +94,44 @@ index 80a8f291f30d50d8ef0499d54ee4a3b9b53e89d6..4cafbe78e6ec8eef207322b4141f38ea
 diff --git a/lib/scrapers/visa-cal.js b/lib/scrapers/visa-cal.js
 --- a/lib/scrapers/visa-cal.js
 +++ b/lib/scrapers/visa-cal.js
+@@ -25,7 +25,7 @@ const apiHeaders = {
+   'Sec-Fetch-Mode': 'cors',
+   'Sec-Fetch-Dest': 'empty'
+ };
+-const LOGIN_URL = 'https://www.cal-online.co.il/';
++const LOGIN_URL = 'https://digital-web.cal-online.co.il/login';
+ const TRANSACTIONS_REQUEST_ENDPOINT = 'https://api.cal-online.co.il/Transactions/api/transactionsDetails/getCardTransactionsDetails';
+ const FRAMES_REQUEST_ENDPOINT = 'https://api.cal-online.co.il/Frames/api/Frames/GetFrameStatus';
+ const PENDING_TRANSACTIONS_REQUEST_ENDPOINT = 'https://api.cal-online.co.il/Transactions/api/approvals/getClearanceRequests';
+@@ -151,18 +151,14 @@ function convertParsedDataToTransactions(data, pendingData, options) {
+ class VisaCalScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+   authorization = undefined;
+   openLoginPopup = async () => {
+-    debug('open login popup, wait until login button available');
+-    await (0, _elementsInteractions.waitUntilElementFound)(this.page, '#ccLoginDesktopBtn', true);
+-    debug('click on the login button');
+-    await (0, _elementsInteractions.clickButton)(this.page, '#ccLoginDesktopBtn');
+     debug('get the frame that holds the login');
+     const frame = await getLoginFrame(this.page);
+     debug('wait until the password login tab header is available');
+     await (0, _elementsInteractions.waitUntilElementFound)(frame, '#regular-login');
+     debug('navigate to the password login tab');
+     await (0, _elementsInteractions.clickButton)(frame, '#regular-login');
+     debug('wait until the password login tab is active');
+-    await (0, _elementsInteractions.waitUntilElementFound)(frame, 'regular-login');
++    await (0, _elementsInteractions.waitUntilElementFound)(frame, '[formcontrolname="userName"]');
+     return frame;
+   };
+   async getCards() {
+@@ -213,7 +209,7 @@ class VisaCalScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+       fields: createLoginFields(credentials),
+       submitButtonSelector: 'button[type="submit"]',
+       possibleResults: getPossibleLoginResults(),
+-      checkReadiness: async () => (0, _elementsInteractions.waitUntilElementFound)(this.page, '#ccLoginDesktopBtn'),
++      checkReadiness: async () => getLoginFrame(this.page),
+       preAction: this.openLoginPopup,
+       postAction: async () => {
+         try {
 @@ -256,11 +256,12 @@ class VisaCalScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
        'Content-Type': 'application/json',
        ...apiHeaders
