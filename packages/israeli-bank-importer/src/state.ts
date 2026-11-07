@@ -5,6 +5,19 @@ import type { PendingState } from './types.js';
 
 const EMPTY_STATE: PendingState = { version: 1, records: {} };
 
+export async function prepareStorage(storageDir: string): Promise<{
+  actualDataDir: string;
+  chromeDataDir: string;
+}> {
+  const actualDataDir = path.join(storageDir, 'actual-data');
+  const chromeDataDir = path.join(storageDir, 'chrome-data');
+  await Promise.all([
+    mkdir(actualDataDir, { recursive: true }),
+    mkdir(chromeDataDir, { recursive: true }),
+  ]);
+  return { actualDataDir, chromeDataDir };
+}
+
 export class PendingStateStore {
   private readonly filePath: string;
 

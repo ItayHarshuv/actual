@@ -17,7 +17,7 @@ import {
   pendingFingerprint,
   sourceIdentifier,
 } from './pending.js';
-import { PendingStateStore } from './state.js';
+import { PendingStateStore, prepareStorage } from './state.js';
 import type {
   ImporterConfig,
   ImportTarget,
@@ -366,12 +366,13 @@ async function scrapeBank(
 }
 
 export async function runImport(config: ImporterConfig): Promise<void> {
+  const { actualDataDir } = await prepareStorage(config.storageDir);
   const stateStore = new PendingStateStore(config.storageDir);
   const state = await stateStore.load();
   const seenPending = new Set<string>();
 
   await actual.init({
-    dataDir: path.join(config.storageDir, 'actual-data'),
+    dataDir: actualDataDir,
     serverURL: config.actual.serverURL,
     password: config.actual.password,
     sessionToken: config.actual.sessionToken,

@@ -21,10 +21,7 @@ RUN yarn install --immutable \
     && yarn workspace @actual-app/api build \
     && yarn workspace @actual-app/israeli-bank-importer build \
     && yarn workspaces focus @actual-app/israeli-bank-importer --production \
-    && mkdir -p /data \
-    && chown -R node:node /data /workspace
-
-USER node
+    && mkdir -p /data
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "packages/israeli-bank-importer/dist/index.cjs"]
