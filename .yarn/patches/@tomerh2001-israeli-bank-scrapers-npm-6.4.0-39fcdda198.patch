@@ -91,3 +91,20 @@ index 80a8f291f30d50d8ef0499d54ee4a3b9b53e89d6..4cafbe78e6ec8eef207322b4141f38ea
  } | {
      username: string;
      password: string;
+diff --git a/lib/scrapers/visa-cal.js b/lib/scrapers/visa-cal.js
+--- a/lib/scrapers/visa-cal.js
++++ b/lib/scrapers/visa-cal.js
+@@ -256,11 +256,12 @@ class VisaCalScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+       'Content-Type': 'application/json',
+       ...apiHeaders
+     });
++    const cardLevelFrames = frames?.result?.bankIssuedCards?.cardLevelFrames ?? [];
+     const accounts = await Promise.all(cards.map(async card => {
+       const finalMonthToFetchMoment = (0, _moment.default)().add(futureMonthsToScrape, 'month');
+       const months = finalMonthToFetchMoment.diff(startMoment, 'months');
+       const allMonthsData = [];
+-      const frame = _lodash.default.find(frames.result.bankIssuedCards.cardLevelFrames, {
++      const frame = _lodash.default.find(cardLevelFrames, {
+         cardUniqueId: card.cardUniqueId
+       });
+       debug(`fetch pending transactions for card ${card.cardUniqueId}`);
