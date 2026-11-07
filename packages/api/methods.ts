@@ -8,6 +8,7 @@ import type {
   APITagEntity,
 } from '@actual-app/core/server/api-models';
 import { lib } from '@actual-app/core/server/main';
+import { exchangeRateCurrencies } from '@actual-app/core/shared/currencies';
 import type { Query } from '@actual-app/core/shared/query';
 import type { ImportTransactionsOpts } from '@actual-app/core/types/api-handlers';
 import type { Handlers } from '@actual-app/core/types/handlers';
@@ -18,6 +19,7 @@ import type {
 } from '@actual-app/core/types/models';
 
 export { q } from './app/query';
+export { exchangeRateCurrencies };
 
 function send<K extends keyof Handlers, T extends Handlers[K]>(
   name: K,
@@ -357,4 +359,18 @@ export function getIDByName(
 
 export function getServerVersion() {
   return send('api/get-server-version');
+}
+
+export function getExchangeRate({
+  source,
+  target,
+  date,
+  provider,
+}: {
+  source: string;
+  target: string;
+  date?: string;
+  provider?: 'frankfurter' | 'bank-of-israel';
+}) {
+  return send('exchange-rates/get', { source, target, date, provider });
 }

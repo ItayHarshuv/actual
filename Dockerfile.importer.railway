@@ -1,0 +1,30 @@
+FROM node:22-bookworm
+
+RUN corepack enable \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        chromium \
+        fonts-liberation \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY . .
+
+ENV NODE_ENV=production
+ENV IMPORTER_STORAGE_DIR=/data
+ENV TZ=Asia/Jerusalem
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+RUN yarn install --immutable \
+    && yarn workspace @actual-app/api build \
+    && yarn workspace @actual-app/israeli-bank-importer build \
+    && yarn workspaces focus @actual-app/israeli-bank-importer --production \
+    && mkdir -p /data \
+    && chown -R node:node /data /workspace
+
+USER node
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "packages/israeli-bank-importer/dist/index.cjs"]

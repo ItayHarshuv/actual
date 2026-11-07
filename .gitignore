@@ -19,6 +19,7 @@ packages/api/app/bundle.api.js
 packages/api/app/stats.json
 packages/api/dist
 packages/api/@types
+packages/israeli-bank-importer/dist
 packages/crdt/dist
 packages/desktop-client/build-stats
 packages/desktop-client/dev-dist

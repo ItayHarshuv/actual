@@ -1,0 +1,28 @@
+{
+  "name": "@actual-app/israeli-bank-importer",
+  "version": "26.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "start": "node dist/index.cjs",
+    "test": "vitest --run",
+    "typecheck": "tsgo -b"
+  },
+  "dependencies": {
+    "@actual-app/api": "workspace:*",
+    "@actual-app/core": "workspace:*",
+    "@tomerh2001/israeli-bank-scrapers": "6.4.0",
+    "node-cron": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "@typescript/native-preview": "^7.0.0-dev.20260309.1",
+    "typescript-strict-plugin": "^2.4.4",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
