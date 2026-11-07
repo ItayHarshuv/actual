@@ -18,6 +18,7 @@ import {
   sourceIdentifier,
 } from './pending.js';
 import { PendingStateStore, prepareStorage } from './state.js';
+import { selectTransactionsForImport } from './transaction-limit.js';
 import type {
   ImporterConfig,
   ImportTarget,
@@ -325,14 +326,16 @@ async function scrapeBank(
     }
     const exchangeRateProvider =
       actualAccount.exchange_rate_provider ?? 'bank-of-israel';
-    const contexts = (sourceAccount.txns as SourceTransaction[]).map(
-      transaction => ({
-        companyId: bank.companyId,
-        sourceAccountNumber,
-        actualAccountId: target.actualAccountId,
-        transaction,
-      }),
+    const transactions = selectTransactionsForImport(
+      bank.companyId,
+      sourceAccount.txns as SourceTransaction[],
     );
+    const contexts = transactions.map(transaction => ({
+      companyId: bank.companyId,
+      sourceAccountNumber,
+      actualAccountId: target.actualAccountId,
+      transaction,
+    }));
 
     for (const context of contexts.filter(
       context => context.transaction.status === 'completed',
