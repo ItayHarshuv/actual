@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import * as actual from '@actual-app/api';
-import { createScraper } from '@tomerh2001/israeli-bank-scrapers';
+import { CompanyTypes, createScraper } from '@tomerh2001/israeli-bank-scrapers';
 import type { ScraperCredentials } from '@tomerh2001/israeli-bank-scrapers';
 
 import type {
@@ -30,6 +30,8 @@ type SourceAccount = {
   accountNumber: string;
   txns: SourceTransaction[];
 };
+
+type OtpCodeRetriever = () => Promise<string>;
 
 function log(event: string, details: Record<string, unknown> = {}): void {
   console.log(
@@ -231,11 +233,13 @@ async function importCompleted(
 async function cleanUpStalePending(
   records: Record<string, PendingRecord>,
   seenPending: Set<string>,
+  successfulBanks: Set<PendingRecord['companyId']>,
   config: ImporterConfig,
 ): Promise<void> {
   const now = new Date();
   for (const [fingerprint, record] of Object.entries(records)) {
     if (
+      !successfulBanks.has(record.companyId) ||
       seenPending.has(fingerprint) ||
       !isPastGracePeriod(record, now, config.pendingGraceDays)
     ) {
@@ -265,6 +269,7 @@ async function scrapeBank(
   bank: ImporterConfig['banks'][number],
   records: Record<string, PendingRecord>,
   seenPending: Set<string>,
+  retrieveOtpCode: OtpCodeRetriever,
 ): Promise<void> {
   const scraper = createScraper({
     companyId: bank.companyId,
@@ -284,7 +289,11 @@ async function scrapeBank(
     });
   });
 
-  const result = await scraper.scrape(bank.credentials as ScraperCredentials);
+  const credentials =
+    bank.companyId === CompanyTypes.hapoalim
+      ? { ...bank.credentials, otpCodeRetriever: retrieveOtpCode }
+      : bank.credentials;
+  const result = await scraper.scrape(credentials as ScraperCredentials);
   if (!result.success) {
     throw new Error(
       `${bank.companyId} scrape failed (${result.errorType}): ${result.errorMessage}`,
@@ -365,11 +374,15 @@ async function scrapeBank(
   }
 }
 
-export async function runImport(config: ImporterConfig): Promise<void> {
+export async function runImport(
+  config: ImporterConfig,
+  retrieveOtpCode: OtpCodeRetriever,
+): Promise<void> {
   const { actualDataDir } = await prepareStorage(config.storageDir);
   const stateStore = new PendingStateStore(config.storageDir);
   const state = await stateStore.load();
   const seenPending = new Set<string>();
+  const successfulBanks = new Set<PendingRecord['companyId']>();
 
   await actual.init({
     dataDir: actualDataDir,
@@ -382,14 +395,40 @@ export async function runImport(config: ImporterConfig): Promise<void> {
     await actual.downloadBudget(config.actual.syncId, {
       password: config.actual.budgetPassword,
     });
+    const failures: Error[] = [];
     for (const bank of config.banks) {
-      await scrapeBank(config, bank, state.records, seenPending);
-      await stateStore.save(state);
+      try {
+        await scrapeBank(
+          config,
+          bank,
+          state.records,
+          seenPending,
+          retrieveOtpCode,
+        );
+        successfulBanks.add(bank.companyId);
+        await stateStore.save(state);
+      } catch (error) {
+        const failure =
+          error instanceof Error ? error : new Error(String(error));
+        failures.push(failure);
+        log('bank_import_failed', {
+          companyId: bank.companyId,
+          error: failure.message,
+        });
+      }
     }
-    await cleanUpStalePending(state.records, seenPending, config);
+    await cleanUpStalePending(
+      state.records,
+      seenPending,
+      successfulBanks,
+      config,
+    );
     await stateStore.save(state);
     if (!config.dryRun) {
       await actual.sync();
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'One or more bank imports failed');
     }
   } finally {
     await actual.shutdown();

@@ -188,7 +188,7 @@ __metadata:
   dependencies:
     "@actual-app/api": "workspace:*"
     "@actual-app/core": "workspace:*"
-    "@tomerh2001/israeli-bank-scrapers": "npm:6.4.0"
+    "@tomerh2001/israeli-bank-scrapers": "patch:@tomerh2001/israeli-bank-scrapers@npm%3A6.4.0#~/.yarn/patches/@tomerh2001-israeli-bank-scrapers-npm-6.4.0-39fcdda198.patch"
     "@types/node": "npm:^22.19.15"
     "@typescript/native-preview": "npm:^7.0.0-dev.20260309.1"
     node-cron: "npm:^4.2.1"
@@ -9322,6 +9322,23 @@ __metadata:
     utility-types: "npm:^3.11.0"
     uuid: "npm:^9.0.1"
   checksum: 10/7395ebccd3deef7329abcdc53d9e857ae84ecd9e0b431b5a2efbb8373bed0bbcda6f7fd4100ab69c83d0ed4db5892a06c4e9ea18c415ccf84f516adc1cba4157
+  languageName: node
+  linkType: hard
+
+"@tomerh2001/israeli-bank-scrapers@patch:@tomerh2001/israeli-bank-scrapers@npm%3A6.4.0#~/.yarn/patches/@tomerh2001-israeli-bank-scrapers-npm-6.4.0-39fcdda198.patch":
+  version: 6.4.0
+  resolution: "@tomerh2001/israeli-bank-scrapers@patch:@tomerh2001/israeli-bank-scrapers@npm%3A6.4.0#~/.yarn/patches/@tomerh2001-israeli-bank-scrapers-npm-6.4.0-39fcdda198.patch::version=6.4.0&hash=1011f9"
+  dependencies:
+    core-js: "npm:^3.1.4"
+    debug: "npm:^4.3.2"
+    lodash: "npm:^4.17.10"
+    moment: "npm:^2.22.2"
+    moment-timezone: "npm:^0.5.37"
+    node-fetch: "npm:^2.2.0"
+    puppeteer: "npm:22.15.0"
+    utility-types: "npm:^3.11.0"
+    uuid: "npm:^9.0.1"
+  checksum: 10/add06ed14099d8ce4344cbb4befa1ae04c45f34f70ef3b1dc7d0fc39bf2115d558232a9ca186b8f0e8d5e5ea4e479dbed048034555c0c85d28c85c9d5e6de698
   languageName: node
   linkType: hard
 

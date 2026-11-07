@@ -12,7 +12,7 @@
   "dependencies": {
     "@actual-app/api": "workspace:*",
     "@actual-app/core": "workspace:*",
-    "@tomerh2001/israeli-bank-scrapers": "6.4.0",
+    "@tomerh2001/israeli-bank-scrapers": "patch:@tomerh2001/israeli-bank-scrapers@npm%3A6.4.0#~/.yarn/patches/@tomerh2001-israeli-bank-scrapers-npm-6.4.0-39fcdda198.patch",
     "node-cron": "^4.2.1"
   },
   "devDependencies": {

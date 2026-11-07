@@ -1,0 +1,93 @@
+diff --git a/lib/scrapers/hapoalim.d.ts b/lib/scrapers/hapoalim.d.ts
+index 2d093ea47b0b9a07dcb347168314df9a9203ebe7..7c98c42dfb478b017e9ef488acc0521990ae65d4 100644
+--- a/lib/scrapers/hapoalim.d.ts
++++ b/lib/scrapers/hapoalim.d.ts
+@@ -3,6 +3,7 @@ import { BaseScraperWithBrowser, type PossibleLoginResults } from './base-scrape
+ type ScraperSpecificCredentials = {
+     userCode: string;
+     password: string;
++    otpCodeRetriever?: () => Promise<string>;
+ };
+ declare class HapoalimScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> {
+     get baseUrl(): string;
+diff --git a/lib/scrapers/hapoalim.js b/lib/scrapers/hapoalim.js
+index f3b065696529879f4f1142fda6b8d84c71035129..a56bf61ec3ff423b92bbea245c2b7f2bcae16663 100644
+--- a/lib/scrapers/hapoalim.js
++++ b/lib/scrapers/hapoalim.js
+@@ -16,6 +16,8 @@ var _baseScraperWithBrowser = require("./base-scraper-with-browser");
+ function _interopRequireDefault(e) { return e && e.__esModule ? e : { default: e }; }
+ const debug = (0, _debug.getDebug)('hapoalim');
+ const DATE_FORMAT = 'YYYYMMDD';
++const OTP_FORM_SELECTOR = 'form.auth-otp-login';
++const OTP_SUBMIT_SELECTOR = '.btn-red_1';
+ 
+ // eslint-disable-next-line @typescript-eslint/no-namespace
+ 
+@@ -478,6 +480,43 @@ function getPossibleLoginResults(baseUrl) {
+   urls[_baseScraperWithBrowser.LoginResults.ChangePassword] = [`${baseUrl}/MCP/START?flow=MCP&state=START&expiredDate=null`, /\/ABOUTTOEXPIRE\/START/i];
+   return urls;
+ }
++async function waitForRedirectOrOtp(page) {
++  const initialUrl = await (0, _navigation.getCurrentUrl)(page, true);
++  return (0, _waiting.waitUntil)(async () => {
++    try {
++      const currentUrl = await (0, _navigation.getCurrentUrl)(page, true);
++      return currentUrl !== initialUrl || !!(await page.$(OTP_FORM_SELECTOR));
++    } catch {
++      return true;
++    }
++  }, `waiting for redirect or OTP form from ${initialUrl}`, 20000, 1000);
++}
++async function completeOtp(page, otpCodeRetriever) {
++  if (!(await page.$(OTP_FORM_SELECTOR))) {
++    return;
++  }
++  if (!otpCodeRetriever) {
++    throw new Error('Hapoalim SMS approval is required, but no OTP code retriever was provided');
++  }
++  const otpCode = await otpCodeRetriever();
++  const otpInputs = await page.$$(`${OTP_FORM_SELECTOR} input[type="text"]`);
++  if (otpInputs.length === 0) {
++    throw new Error('Hapoalim SMS approval form did not contain OTP inputs');
++  }
++  for (let index = 0; index < otpInputs.length; index++) {
++    await otpInputs[index].click();
++    await otpInputs[index].evaluate(element => {
++      element.value = '';
++    });
++    if (index < otpCode.length) {
++      await otpInputs[index].type(otpCode[index], {
++        delay: 50
++      });
++    }
++  }
++  await page.click(OTP_SUBMIT_SELECTOR);
++  await (0, _navigation.waitForRedirect)(page);
++}
+ function createLoginFields(credentials) {
+   return [{
+     selector: '#userCode',
+@@ -497,7 +536,10 @@ class HapoalimScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+       loginUrl: `${this.baseUrl}/cgi-bin/poalwwwc?reqName=getLogonPage`,
+       fields: createLoginFields(credentials),
+       submitButtonSelector: '.login-btn',
+-      postAction: async () => (0, _navigation.waitForRedirect)(this.page),
++      postAction: async () => {
++        await waitForRedirectOrOtp(this.page);
++        await completeOtp(this.page, credentials.otpCodeRetriever);
++      },
+       possibleResults: getPossibleLoginResults(this.baseUrl)
+     };
+   }
+diff --git a/lib/scrapers/interface.d.ts b/lib/scrapers/interface.d.ts
+index 80a8f291f30d50d8ef0499d54ee4a3b9b53e89d6..4cafbe78e6ec8eef207322b4141f38ea1c68eef0 100644
+--- a/lib/scrapers/interface.d.ts
++++ b/lib/scrapers/interface.d.ts
+@@ -5,6 +5,7 @@ import { type ErrorResult, type ScraperErrorTypes } from './errors';
+ export type ScraperCredentials = {
+     userCode: string;
+     password: string;
++    otpCodeRetriever?: () => Promise<string>;
+ } | {
+     username: string;
+     password: string;

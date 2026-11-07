@@ -13,9 +13,9 @@ Review its logs and keep the Railway volume private.
 1. Create another service in the same Railway project from this repository.
 2. Set its Dockerfile path to `Dockerfile.importer.railway`.
 3. Attach a persistent volume mounted at `/data`.
-4. Do not generate a public domain for this worker.
+4. Generate a public domain only when Hapoalim SMS approval is needed.
 5. Add `ISRAELI_BANK_IMPORTER_CONFIG` as a secret variable. You may set
-   `SCHEDULE`, `TZ`, and `DRY_RUN` separately.
+   `SCHEDULE`, `TZ`, `DRY_RUN`, and `OTP_SUBMISSION_TOKEN` separately.
 
 The worker runs once at startup. If `SCHEDULE` is configured, it remains active
 and runs on that cron schedule. A reasonable starting value is `0 */6 * * *`.
@@ -104,9 +104,24 @@ conversion until settlement. Settlement replaces it with CAL's final amount.
 
 ## Authentication maintenance
 
-The browser profile is persisted under `/data/chrome-data`. If Hapoalim or CAL
-requires an interactive challenge that cannot be completed headlessly, pause
-the schedule, authenticate with the same importer image in an interactive
-environment using the persisted profile, then restore that profile to the
-Railway volume. Password changes require updating the Railway secret and
-redeploying.
+The browser profile is persisted under `/data/chrome-data`. Hapoalim may send
+an SMS when it does not recognize that browser. To handle this:
+
+1. Generate a strong secret, for example with `openssl rand -hex 32`, and set it
+   as the Railway variable `OTP_SUBMISSION_TOKEN`.
+2. Generate a Railway public domain for the importer service.
+3. When the log contains `"event":"hapoalim_otp_required"`, submit the SMS code:
+
+```sh
+curl -X POST https://your-importer.up.railway.app/otp \
+  -H "Authorization: Bearer YOUR_OTP_SUBMISSION_TOKEN" \
+  -d "code=123456"
+```
+
+The endpoint accepts a code only while Hapoalim is waiting for one and never
+logs or stores it. It waits for five minutes. The successful browser profile is
+kept on the Railway volume, so Hapoalim may skip SMS approval on later runs.
+
+`GET /health` reports whether the importer is currently waiting for a code.
+Keep the public domain and submission token private. Password changes require
+updating the Railway secret and redeploying.
