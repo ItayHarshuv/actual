@@ -89,13 +89,13 @@ async function buildFields(
   return {
     date: toDate(context.transaction.date),
     amount: currency.amount,
-    original_amount: currency.original_amount,
-    original_currency: currency.original_currency,
-    exchange_rate: currency.exchange_rate,
-    exchange_rate_date: currency.exchange_rate_date,
+    original_amount: currency.original_amount ?? null,
+    original_currency: currency.original_currency ?? null,
+    exchange_rate: currency.exchange_rate ?? null,
+    exchange_rate_date: currency.exchange_rate_date ?? null,
     payee_name: context.transaction.description,
     imported_payee: context.transaction.description,
-    notes: currency.notes,
+    ...(currency.notes === undefined ? {} : { notes: currency.notes }),
     imported_id: importedId,
     cleared: context.transaction.status === 'completed',
   };
