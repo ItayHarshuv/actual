@@ -551,8 +551,7 @@ handlers['api/transaction-update'] = withMutation(async function ({
   }
 
   const { diff } = updateTransaction(transactions, { id, ...fields });
-  const { updated } = await handlers['transactions-batch-update'](diff);
-  return updated;
+  return handlers['transactions-batch-update'](diff)['updated'];
 });
 
 handlers['api/transaction-delete'] = withMutation(async function ({ id }) {
@@ -567,8 +566,7 @@ handlers['api/transaction-delete'] = withMutation(async function ({ id }) {
   }
 
   const { diff } = deleteTransaction(transactions, id);
-  const { deleted } = await handlers['transactions-batch-update'](diff);
-  return deleted;
+  return handlers['transactions-batch-update'](diff)['deleted'];
 });
 
 handlers['api/accounts-get'] = async function () {
