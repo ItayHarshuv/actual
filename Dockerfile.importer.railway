@@ -17,7 +17,7 @@ ENV TZ=Asia/Jerusalem
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-RUN yarn workspaces focus @actual-app/israeli-bank-importer @actual-app/web \
+RUN YARN_ENABLE_SCRIPTS=false yarn workspaces focus @actual-app/israeli-bank-importer @actual-app/web \
     && yarn workspace @actual-app/api build \
     && yarn workspace @actual-app/israeli-bank-importer build \
     && yarn workspaces focus @actual-app/israeli-bank-importer --production \
