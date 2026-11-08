@@ -22,6 +22,10 @@ import {
   sourceIdentifier,
 } from './pending.js';
 import { PendingStateStore, prepareStorage } from './state.js';
+import {
+  toTransactionFields,
+  toTransactionUpdate,
+} from './transaction-fields.js';
 import { selectTransactionsForImport } from './transaction-limit.js';
 import type {
   ImporterConfig,
@@ -86,19 +90,7 @@ async function buildFields(
   importedId: string,
 ) {
   const currency = await mapCurrency(context.transaction, exchangeRateProvider);
-  return {
-    date: toDate(context.transaction.date),
-    amount: currency.amount,
-    original_amount: currency.original_amount,
-    original_currency: currency.original_currency,
-    exchange_rate: currency.exchange_rate,
-    exchange_rate_date: currency.exchange_rate_date,
-    payee_name: context.transaction.description,
-    imported_payee: context.transaction.description,
-    notes: currency.notes,
-    imported_id: importedId,
-    cleared: context.transaction.status === 'completed',
-  };
+  return toTransactionFields(context.transaction, currency, importedId);
 }
 
 async function recoverImportedTransactionId(
@@ -144,8 +136,10 @@ async function importPending(
       return { ...existing, lastSeenAt: now };
     }
     if (transaction) {
-      const { payee_name: _payeeName, ...updateFields } = fields;
-      await actual.updateTransaction(transaction.id, updateFields);
+      await actual.updateTransaction(
+        transaction.id,
+        toTransactionUpdate(fields),
+      );
       actualTransactionId = transaction.id;
     }
   }
@@ -210,8 +204,7 @@ async function importCompleted(
   if (pendingMatch) {
     const existing = await findActualTransaction(pendingMatch);
     if (existing && !existing.cleared && !existing.reconciled) {
-      const { payee_name: _payeeName, ...updateFields } = fields;
-      await actual.updateTransaction(existing.id, updateFields);
+      await actual.updateTransaction(existing.id, toTransactionUpdate(fields));
       matchedPending.add(pendingMatch.fingerprint);
       log('pending_settled', {
         transactionId: existing.id,
