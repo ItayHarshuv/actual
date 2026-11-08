@@ -30,7 +30,6 @@ import type {
   SourceTransaction,
   SourceTransactionWithContext,
 } from './types.js';
-import { toUpdateFields } from './update-fields.js';
 
 type SourceAccount = {
   accountNumber: string;
@@ -145,7 +144,8 @@ async function importPending(
       return { ...existing, lastSeenAt: now };
     }
     if (transaction) {
-      await actual.updateTransaction(transaction.id, toUpdateFields(fields));
+      const { payee_name: _payeeName, ...updateFields } = fields;
+      await actual.updateTransaction(transaction.id, updateFields);
       actualTransactionId = transaction.id;
     }
   }
@@ -210,7 +210,8 @@ async function importCompleted(
   if (pendingMatch) {
     const existing = await findActualTransaction(pendingMatch);
     if (existing && !existing.cleared && !existing.reconciled) {
-      await actual.updateTransaction(existing.id, toUpdateFields(fields));
+      const { payee_name: _payeeName, ...updateFields } = fields;
+      await actual.updateTransaction(existing.id, updateFields);
       matchedPending.add(pendingMatch.fingerprint);
       log('pending_settled', {
         transactionId: existing.id,
