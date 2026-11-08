@@ -17,7 +17,8 @@ ENV TZ=Asia/Jerusalem
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-RUN yarn install --immutable \
+RUN yarn install --immutable --mode=skip-build \
+    && yarn rebuild better-sqlite3 \
     && yarn workspace @actual-app/api build \
     && yarn workspace @actual-app/israeli-bank-importer build \
     && yarn workspaces focus @actual-app/israeli-bank-importer --production \
