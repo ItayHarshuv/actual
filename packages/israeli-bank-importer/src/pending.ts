@@ -12,6 +12,25 @@ function normalizeDescription(value: string): string {
     .trim();
 }
 
+function descriptionsMatch(left: string, right: string): boolean {
+  const normalizedLeft = normalizeDescription(left);
+  const normalizedRight = normalizeDescription(right);
+
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+
+  const [shorter, longer] =
+    normalizedLeft.length < normalizedRight.length
+      ? [normalizedLeft, normalizedRight]
+      : [normalizedRight, normalizedLeft];
+
+  return (
+    shorter.length > 0 &&
+    (longer.startsWith(`${shorter} `) || longer.endsWith(` ${shorter}`))
+  );
+}
+
 function dateDistanceInDays(left: string, right: string): number {
   return Math.abs(
     (new Date(left).getTime() - new Date(right).getTime()) / 86_400_000,
@@ -88,15 +107,16 @@ export function findPendingMatch(
   }
 
   const transaction = completed.transaction;
-  const normalizedDescription = normalizeDescription(transaction.description);
   const candidates = eligible
     .filter(record => {
       const sameCurrency =
         record.originalCurrency === transaction.originalCurrency;
       const sameAmount =
         Math.abs(record.originalAmount - transaction.originalAmount) < 0.01;
-      const sameDescription =
-        normalizeDescription(record.description) === normalizedDescription;
+      const sameDescription = descriptionsMatch(
+        record.description,
+        transaction.description,
+      );
       const allowedDateDistance =
         completed.companyId === CompanyTypes.visaCal ? 7 : 3;
       return (

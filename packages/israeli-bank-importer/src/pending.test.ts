@@ -100,6 +100,49 @@ describe('pending transaction identity', () => {
     );
   });
 
+  it('matches a settlement when the bank removes payee details', () => {
+    const pending = context({
+      description: 'Cursor Usage Mid Oct +18314259504 Us',
+    });
+    const completed = context({
+      date: '2026-11-06T00:00:00.000Z',
+      status: 'completed',
+      description: 'Cursor Usage Mid Oct',
+    });
+
+    expect(findPendingMatch(completed, [record(pending)])?.fingerprint).toBe(
+      record(pending).fingerprint,
+    );
+  });
+
+  it.each(['Cursors Usage Mid Oct', 'Hostelworld'])(
+    'does not match a different payee named %s',
+    description => {
+      const pending = context({
+        description: 'Cursor Usage Mid Oct +18314259504 Us',
+      });
+      const completed = context({
+        status: 'completed',
+        description,
+      });
+
+      expect(findPendingMatch(completed, [record(pending)])).toBeUndefined();
+    },
+  );
+
+  it('does not match a similar payee outside the settlement window', () => {
+    const pending = context({
+      description: 'Cursor Usage Mid Oct +18314259504 Us',
+    });
+    const completed = context({
+      date: '2026-11-09T00:00:00.000Z',
+      status: 'completed',
+      description: 'Cursor Usage Mid Oct',
+    });
+
+    expect(findPendingMatch(completed, [record(pending)])).toBeUndefined();
+  });
+
   it('does not match a different amount', () => {
     const pending = context();
     const completed = context({
